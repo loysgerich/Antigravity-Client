@@ -1,0 +1,367 @@
+use rusqlite::Connection;
+use std::path::PathBuf;
+use crate::utils::protobuf;
+
+pub fn get_db_path() -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+        let new_path = home.join("Library/Application Support/Antigravity IDE/User/globalStorage/state.vscdb");
+        if new_path.exists() {
+            return Ok(new_path);
+        }
+        Ok(home.join("Library/Application Support/Antigravity/User/globalStorage/state.vscdb"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").map_err(|_| "Failed to get APPDATA environment variable".to_string())?;
+        let new_path = PathBuf::from(&appdata).join("Antigravity IDE\\User\\globalStorage\\state.vscdb");
+        if new_path.exists() {
+            return Ok(new_path);
+        }
+        Ok(PathBuf::from(appdata).join("Antigravity\\User\\globalStorage\\state.vscdb"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+        let new_path = home.join(".config/Antigravity IDE/User/globalStorage/state.vscdb");
+        if new_path.exists() {
+            return Ok(new_path);
+        }
+        Ok(home.join(".config/Antigravity/User/globalStorage/state.vscdb"))
+    }
+}
+
+/// Inject token using BOTH methods for maximum compatibility:
+/// 1. System Keyring (secret-tool on Linux, security on macOS, cmdkey on Windows)
+///    — required for Antigravity >= 2.0.0
+/// 2. SQLite database injection — required for Antigravity < 2.0.0
+pub fn inject_token_and_proxy(token: &str, proxy_url: &str) -> Result<String, String> {
+    let email = "proxy_user@antigravity";
+    let expiry: i64 = 4070908800; // 2099 year
+
+    // ===== Method 1: System Keyring (for Antigravity >= 2.0.0) =====
+    let keyring_result = write_to_system_keyring(token, expiry);
+    match &keyring_result {
+        Ok(_) => eprintln!("[Client] Successfully wrote token to system keyring"),
+        Err(e) => eprintln!("[Client] Keyring write failed (may be OK for older versions): {}", e),
+    }
+
+    // ===== Method 2: SQLite database injection (for Antigravity < 2.0.0) =====
+    let db_result = inject_to_sqlite(token, proxy_url, email, expiry);
+    match &db_result {
+        Ok(_) => eprintln!("[Client] Successfully wrote token to SQLite database"),
+        Err(e) => eprintln!("[Client] SQLite write failed (may be OK for newer versions): {}", e),
+    }
+
+    // Success if either method worked
+    if keyring_result.is_ok() || db_result.is_ok() {
+        Ok("Token injection successful".to_string())
+    } else {
+        Err(format!(
+            "Both injection methods failed. Keyring: {:?}, SQLite: {:?}",
+            keyring_result.err(),
+            db_result.err()
+        ))
+    }
+}
+
+/// Inject a real OAuth token (with separate access/refresh tokens) for IDE v2.0+
+pub fn inject_real_token(access_token: &str, refresh_token: &str, expiry: i64, proxy_url: &str) -> Result<String, String> {
+    let email = "proxy_user@antigravity";
+
+    // ===== Method 1: System Keyring (for Antigravity >= 2.0.0) =====
+    let keyring_result = write_real_token_to_keyring(access_token, refresh_token, expiry);
+    match &keyring_result {
+        Ok(_) => eprintln!("[Client] Successfully wrote real token to system keyring"),
+        Err(e) => eprintln!("[Client] Keyring write failed: {}", e),
+    }
+
+    // ===== Method 2: SQLite (for older versions) =====
+    let db_result = inject_to_sqlite(access_token, proxy_url, email, expiry);
+    match &db_result {
+        Ok(_) => eprintln!("[Client] Successfully wrote token to SQLite database"),
+        Err(e) => eprintln!("[Client] SQLite write failed: {}", e),
+    }
+
+    if keyring_result.is_ok() || db_result.is_ok() {
+        Ok("Token injection successful".to_string())
+    } else {
+        Err(format!(
+            "Both injection methods failed. Keyring: {:?}, SQLite: {:?}",
+            keyring_result.err(),
+            db_result.err()
+        ))
+    }
+}
+
+/// Write a real OAuth token to system keyring as raw JSON
+fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: i64) -> Result<(), String> {
+    use std::process::Command;
+
+    let expiry_str = format_timestamp_rfc3339(expiry);
+
+    let payload = serde_json::json!({
+        "token": {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "refresh_token": refresh_token,
+            "expiry": expiry_str
+        },
+        "auth_method": "consumer"
+    });
+
+    let payload_json = serde_json::to_string(&payload)
+        .map_err(|e| format!("Failed to serialize keyring JSON: {}", e))?;
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::Write;
+
+        // Delete old credential
+        let _ = Command::new("secret-tool")
+            .args(["clear", "service", "gemini", "username", "antigravity"])
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+            .output();
+
+        // Write new credential
+        let mut child = Command::new("secret-tool")
+            .args(["store", "--label=gemini", "service", "gemini", "username", "antigravity"])
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn secret-tool: {}", e))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(payload_json.as_bytes())
+                .map_err(|e| format!("Failed to write to secret-tool stdin: {}", e))?;
+        }
+
+        let output = child.wait_with_output()
+            .map_err(|e| format!("Failed to wait for secret-tool: {}", e))?;
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("secret-tool failed: {}", err_msg.trim()));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("security")
+            .args(["delete-generic-password", "-s", "gemini", "-a", "antigravity"])
+            .output();
+        let output = Command::new("security")
+            .args(["add-generic-password", "-s", "gemini", "-a", "antigravity", "-w", &payload_json, "-A"])
+            .output()
+            .map_err(|e| format!("Failed to execute security command: {}", e))?;
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("macOS security command failed: {}", err_msg.trim()));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("cmdkey")
+            .args(["/delete:gemini"])
+            .output();
+        let _ = Command::new("cmdkey")
+            .args([&format!("/generic:gemini"), "/user:antigravity", &format!("/pass:{}", payload_json)])
+            .output();
+    }
+
+    Ok(())
+}
+
+/// Write token to system credential store (matches Manager's write_to_system_keyring)
+fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
+    use base64::{engine::general_purpose, Engine as _};
+    use std::process::Command;
+
+    // Build the exact same JSON payload format as the Manager
+    let expiry_secs = expiry;
+    // Format expiry as RFC3339 with microseconds
+    // 4070908800 = 2099-01-01T00:00:00.000000Z
+    let expiry_str = format_timestamp_rfc3339(expiry_secs);
+
+    let payload = serde_json::json!({
+        "token": {
+            "access_token": token,
+            "token_type": "Bearer",
+            "refresh_token": token,
+            "expiry": expiry_str
+        },
+        "auth_method": "consumer"
+    });
+
+    let payload_json = serde_json::to_string(&payload)
+        .map_err(|e| format!("Failed to serialize keyring JSON: {}", e))?;
+
+    // Language server v2.x expects raw JSON in keyring (not go-keyring-base64 encoded)
+    let full_keyring_value = payload_json;
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::Write;
+
+        // Ensure gnome-keyring-daemon is running (critical for WSL)
+        // This uses a wrapper script that starts dbus + keyring if needed
+        let _ = Command::new("bash")
+            .arg("-c")
+            .arg("if [ -z \"$DBUS_SESSION_BUS_ADDRESS\" ]; then eval $(dbus-launch --sh-syntax); export DBUS_SESSION_BUS_ADDRESS; fi; killall -0 gnome-keyring-daemon || (rm -rf ~/.local/share/keyrings && mkdir -p ~/.local/share/keyrings && eval $(echo '' | gnome-keyring-daemon --unlock --components=secrets))")
+            .output();
+        
+        // Delete old credential (ignore errors)
+        let _ = Command::new("secret-tool")
+            .args(["clear", "service", "gemini", "username", "antigravity"])
+            .output();
+
+        // Write new credential
+        let mut child = Command::new("secret-tool")
+            .args(["store", "--label=gemini", "service", "gemini", "username", "antigravity"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn secret-tool: {}", e))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(full_keyring_value.as_bytes())
+                .map_err(|e| format!("Failed to write to secret-tool stdin: {}", e))?;
+        }
+
+        let output = child.wait_with_output()
+            .map_err(|e| format!("Failed to wait for secret-tool: {}", e))?;
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("secret-tool failed: {}", err_msg.trim()));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Delete old
+        let _ = Command::new("security")
+            .args(["delete-generic-password", "-s", "gemini", "-a", "antigravity"])
+            .output();
+
+        // Write new
+        let output = Command::new("security")
+            .args(["add-generic-password", "-s", "gemini", "-a", "antigravity", "-w", &full_keyring_value, "-A"])
+            .output()
+            .map_err(|e| format!("Failed to execute security command: {}", e))?;
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("macOS security command failed: {}", err_msg.trim()));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        
+        // Delete old
+        let _ = Command::new("cmdkey")
+            .args(["/delete:gemini"])
+            .creation_flags(0x08000000)
+            .output();
+
+        // Write new
+        let output = Command::new("cmdkey")
+            .args(["/generic:gemini", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|e| format!("Failed to execute cmdkey: {}", e))?;
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Windows cmdkey failed: {}", err_msg.trim()));
+        }
+    }
+
+    Ok(())
+}
+
+/// Format Unix timestamp as RFC3339 with microseconds (matching Manager's chrono output)
+fn format_timestamp_rfc3339(timestamp: i64) -> String {
+    // Simple manual formatting to avoid adding chrono dependency
+    // For 4070908800: 2099-01-01T00:00:00.000000Z
+    let secs_per_day: i64 = 86400;
+    let days_since_epoch = timestamp / secs_per_day;
+    let time_of_day = timestamp % secs_per_day;
+
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+    let seconds = time_of_day % 60;
+
+    // Simple date calculation from days since Unix epoch
+    let (year, month, day) = days_to_date(days_since_epoch);
+    
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000000Z", year, month, day, hours, minutes, seconds)
+}
+
+fn days_to_date(mut days: i64) -> (i64, i64, i64) {
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    days += 719468;
+    let era = if days >= 0 { days } else { days - 146096 } / 146097;
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+/// Legacy SQLite injection (for Antigravity < 2.0.0)
+fn inject_to_sqlite(token: &str, proxy_url: &str, email: &str, expiry: i64) -> Result<String, String> {
+    let db_path = get_db_path()?;
+    if !db_path.exists() {
+        return Err(format!("Antigravity IDE database not found at {:?}", db_path));
+    }
+
+    let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open DB: {}", e))?;
+
+    // Create OAuth info (simulated for the client)
+    let oauth_info = protobuf::create_oauth_info(
+        token,
+        token, // refresh token same as access token
+        expiry,
+        false, // gcp tos
+        None,
+        Some(email),
+    );
+    let outer_b64 = protobuf::create_unified_state_entry("oauthTokenInfoSentinelKey", &oauth_info);
+    
+    conn.execute(
+        "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
+        ["antigravityUnifiedStateSync.oauthToken", &outer_b64],
+    ).map_err(|e| format!("Failed to write oauth token: {}", e))?;
+
+    let user_status_payload = protobuf::create_minimal_user_status_payload(email);
+    let user_status_entry_b64 = protobuf::create_unified_state_entry("userStatusSentinelKey", &user_status_payload);
+    conn.execute(
+        "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
+        ["antigravityUnifiedStateSync.userStatus", &user_status_entry_b64],
+    ).map_err(|e| format!("Failed to write user status: {}", e))?;
+
+    // Write custom proxy URL
+    conn.execute(
+        "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
+        ["antigravity.proxyBaseUrl", proxy_url],
+    ).map_err(|e| format!("Failed to write proxy url: {}", e))?;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
+        ["antigravityOnboarding", "true"],
+    ).map_err(|e| format!("Failed to write onboarding flag: {}", e))?;
+
+    Ok("Successfully injected token and proxy URL into Antigravity IDE.".to_string())
+}
