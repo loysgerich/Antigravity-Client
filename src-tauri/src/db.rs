@@ -352,11 +352,17 @@ fn inject_to_sqlite(token: &str, proxy_url: &str, email: &str, expiry: i64) -> R
         ["antigravityUnifiedStateSync.userStatus", &user_status_entry_b64],
     ).map_err(|e| format!("Failed to write user status: {}", e))?;
 
-    // Write custom proxy URL
-    conn.execute(
-        "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
-        ["antigravity.proxyBaseUrl", proxy_url],
-    ).map_err(|e| format!("Failed to write proxy url: {}", e))?;
+    if proxy_url.is_empty() {
+        conn.execute(
+            "DELETE FROM ItemTable WHERE key = ?",
+            ["antigravity.proxyBaseUrl"],
+        ).map_err(|e| format!("Failed to clear proxy url: {}", e))?;
+    } else {
+        conn.execute(
+            "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
+            ["antigravity.proxyBaseUrl", proxy_url],
+        ).map_err(|e| format!("Failed to write proxy url: {}", e))?;
+    }
 
     conn.execute(
         "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
