@@ -63,6 +63,9 @@ export default function App() {
   const [token, setToken] = useState('');
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelPercentages, setModelPercentages] = useState<Record<string, number>>({});
+  const [totalCredits, setTotalCredits] = useState<number | null>(null);
+  const [creditOverages, setCreditOverages] = useState(false);
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -125,6 +128,22 @@ export default function App() {
         const data: ModelsResponse = await res.json();
         const modelList = (data.data || []).filter(m => IDE_ALLOWED_MODELS.includes(m.id));
         setModels(modelList);
+        
+        try {
+          const qRes = await fetch(`${serverBase}/v1/quota`, {
+            headers: { 'Authorization': `Bearer ${tokenToUse}` },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (qRes.ok) {
+            const qData = await qRes.json();
+            setTotalCredits(qData.total_credits);
+            setCreditOverages(qData.enable_credit_overages);
+            setModelPercentages(qData.models || {});
+          }
+        } catch (e) {
+          console.error('Failed to fetch quota', e);
+        }
+
         setConnected(true);
         setServerOnline(true);
         localStorage.setItem(LS_TOKEN_KEY, tokenToUse);
@@ -218,12 +237,53 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Poll quota
+  useEffect(() => {
+    if (!connected || !token) return;
+    const fetchQuota = async () => {
+      try {
+        const qRes = await fetch(`${serverUrl}/v1/quota`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (qRes.ok) {
+          const qData = await qRes.json();
+          setTotalCredits(qData.total_credits);
+          setCreditOverages(qData.enable_credit_overages);
+          setModelPercentages(qData.models || {});
+        }
+      } catch (e) {
+        // ignore periodic failures
+      }
+    };
+    const interval = setInterval(fetchQuota, 10000);
+    return () => clearInterval(interval);
+  }, [connected, token, serverUrl]);
+
   const handleSaveServerUrl = () => {
     localStorage.setItem(LS_SERVER_KEY, serverUrl);
     setShowSettings(false);
     checkServerHealth(serverUrl);
     if (token && connected) {
       validateToken(token, serverUrl);
+    }
+  };
+
+  const toggleCreditOverages = async () => {
+    try {
+      const newState = !creditOverages;
+      setCreditOverages(newState); // optimistic update
+      await fetch(`${serverUrl}/v1/quota/config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ enable_credit_overages: newState }),
+      });
+    } catch (e) {
+      console.error('Failed to toggle config', e);
+      setCreditOverages(!creditOverages); // revert on error
     }
   };
 
@@ -418,7 +478,7 @@ export default function App() {
         )}
 
         {/* ─── Main Grid ───────────────────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-6">
 
           {/* Connection Status Card */}
           <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6 relative overflow-hidden group">
@@ -444,6 +504,29 @@ export default function App() {
             </div>
             <div className="text-2xl font-bold text-white mb-1">{models.length}</div>
             <div className="text-xs text-gray-500">Available AI models</div>
+          </div>
+
+          {/* Credits Card */}
+          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6 relative overflow-hidden group flex flex-col justify-between">
+            <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-amber-500/10 blur-[50px] group-hover:bg-amber-500/20 transition-all" />
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/30">
+                    <Zap className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <h3 className="text-sm font-medium text-gray-300">Credits</h3>
+                </div>
+                <div className="flex items-center">
+                  <label className="relative inline-flex items-center cursor-pointer" title="Enable Credit Overages">
+                    <input type="checkbox" className="sr-only peer" checked={creditOverages} onChange={toggleCreditOverages} />
+                    <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                  </label>
+                </div>
+              </div>
+              <div className="text-2xl font-bold text-amber-400 mb-1">{totalCredits !== null ? totalCredits : '-'}</div>
+              <div className="text-xs text-gray-500">Total combined credits</div>
+            </div>
           </div>
 
           {/* Server Card */}
@@ -491,12 +574,24 @@ export default function App() {
                       {categoryModels.map(model => (
                         <div
                           key={model.id}
-                          className="flex items-center space-x-3 px-3 py-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl transition-colors group/model"
+                          className="flex flex-col space-y-1.5 px-3 py-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl transition-colors group/model"
                         >
-                          <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${catInfo.color} flex-shrink-0`} />
-                          <span className="text-sm text-gray-300 truncate group-hover/model:text-white transition-colors" title={model.id}>
-                            {formatModelName(model.id)}
-                          </span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${catInfo.color} flex-shrink-0`} />
+                              <span className="text-sm text-gray-300 truncate group-hover/model:text-white transition-colors" title={model.id}>
+                                {formatModelName(model.id)}
+                              </span>
+                            </div>
+                            {modelPercentages[model.id] !== undefined && (
+                              <span className="text-[10px] text-gray-500 font-mono">{modelPercentages[model.id]}%</span>
+                            )}
+                          </div>
+                          {modelPercentages[model.id] !== undefined && (
+                            <div className="w-full bg-white/10 rounded-full h-1 mt-1 overflow-hidden">
+                              <div className={`h-1 rounded-full bg-gradient-to-r ${catInfo.color}`} style={{ width: `${Math.min(100, Math.max(0, modelPercentages[model.id]))}%` }}></div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
