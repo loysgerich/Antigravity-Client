@@ -571,29 +571,32 @@ export default function App() {
                       <span className="text-xs text-gray-600">({categoryModels.length})</span>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {categoryModels.map(model => (
-                        <div
-                          key={model.id}
-                          className="flex flex-col space-y-1.5 px-3 py-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl transition-colors group/model"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-3">
-                              <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${catInfo.color} flex-shrink-0`} />
-                              <span className="text-sm text-gray-300 truncate group-hover/model:text-white transition-colors" title={model.id}>
-                                {formatModelName(model.id)}
-                              </span>
+                      {categoryModels.map(model => {
+                        const pct = modelPercentages[model.id] ?? modelPercentages[model.id.replace('-thinking', '')];
+                        return (
+                          <div
+                            key={model.id}
+                            className="flex flex-col space-y-1.5 px-3 py-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl transition-colors group/model"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-3">
+                                <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${catInfo.color} flex-shrink-0`} />
+                                <span className="text-sm text-gray-300 truncate group-hover/model:text-white transition-colors" title={model.id}>
+                                  {formatModelName(model.id)}
+                                </span>
+                              </div>
+                              {pct !== undefined && (
+                                <span className="text-[10px] text-gray-500 font-mono">{pct}%</span>
+                              )}
                             </div>
-                            {modelPercentages[model.id] !== undefined && (
-                              <span className="text-[10px] text-gray-500 font-mono">{modelPercentages[model.id]}%</span>
+                            {pct !== undefined && (
+                              <div className="w-full bg-white/10 rounded-full h-1 mt-1 overflow-hidden">
+                                <div className={`h-1 rounded-full bg-gradient-to-r ${catInfo.color}`} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}></div>
+                              </div>
                             )}
                           </div>
-                          {modelPercentages[model.id] !== undefined && (
-                            <div className="w-full bg-white/10 rounded-full h-1 mt-1 overflow-hidden">
-                              <div className={`h-1 rounded-full bg-gradient-to-r ${catInfo.color}`} style={{ width: `${Math.min(100, Math.max(0, modelPercentages[model.id]))}%` }}></div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );
