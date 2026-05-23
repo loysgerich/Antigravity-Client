@@ -48,7 +48,7 @@ pub fn get_db_path(ide_type: &str, custom_db_path: Option<&str>) -> Result<PathB
 /// 1. System Keyring (secret-tool on Linux, security on macOS, cmdkey on Windows)
 ///    — required for Antigravity >= 2.0.0
 /// 2. SQLite database injection — required for Antigravity < 2.0.0
-pub fn inject_token_and_proxy(token: &str, proxy_url: &str) -> Result<String, String> {
+pub fn inject_token_and_proxy(token: &str, proxy_url: &str, ide_type: &str, custom_db_path: Option<&str>) -> Result<String, String> {
     let email = "proxy_user@antigravity";
     let expiry: i64 = 4070908800; // 2099 year
 
@@ -60,7 +60,7 @@ pub fn inject_token_and_proxy(token: &str, proxy_url: &str) -> Result<String, St
     }
 
     // ===== Method 2: SQLite database injection (for Antigravity < 2.0.0) =====
-    let db_result = inject_to_sqlite(token, proxy_url, email, expiry);
+    let db_result = inject_to_sqlite(token, proxy_url, email, expiry, ide_type, custom_db_path);
     match &db_result {
         Ok(_) => eprintln!("[Client] Successfully wrote token to SQLite database"),
         Err(e) => eprintln!("[Client] SQLite write failed (may be OK for newer versions): {}", e),
