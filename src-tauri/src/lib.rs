@@ -12,7 +12,13 @@ static PROXY_SHUTDOWN: Mutex<Option<watch::Sender<bool>>> = Mutex::new(None);
 static PROXY_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[tauri::command]
-async fn inject_token_and_start_ide(token: String, proxy_url: String) -> Result<String, String> {
+async fn inject_token_and_start_ide(
+    token: String, 
+    proxy_url: String,
+    ide_type: String,
+    custom_exe_path: Option<String>,
+    custom_db_path: Option<String>,
+) -> Result<String, String> {
     // 1. Kill any running Antigravity IDE first
     kill_running_antigravity();
 
@@ -55,12 +61,14 @@ async fn inject_token_and_start_ide(token: String, proxy_url: String) -> Result<
         "proxy_managed_refresh_token",
         4070908800i64,
         "http://127.0.0.1:8047/v1", // Route IDE traffic to our local proxy
+        &ide_type,
+        custom_db_path.as_deref(),
     )?;
 
     eprintln!("[Client] Token injected successfully");
 
     // 6. Start Antigravity IDE
-    start_antigravity_ide()?;
+    start_antigravity_ide(&ide_type, custom_exe_path.as_deref())?;
 
     Ok("Proxy started and IDE launched successfully".to_string())
 }
@@ -115,39 +123,38 @@ fn kill_running_antigravity() {
 }
 
 /// Start Antigravity IDE
-fn start_antigravity_ide() -> Result<(), String> {
+fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Result<(), String> {
+    if let Some(path) = custom_exe_path {
+        if !path.is_empty() {
+            let _ = std::process::Command::new(path).spawn();
+            return Ok(());
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
+        let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
         let _ = std::process::Command::new("open")
-            .args(["-a", "Antigravity IDE"])
-            .spawn()
-            .or_else(|_| {
-                std::process::Command::new("open")
-                    .args(["-a", "Antigravity"])
-                    .spawn()
-            });
+            .args(["-a", app_name])
+            .spawn();
     }
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
-        let path_ide = format!("{}\\Programs\\Antigravity IDE\\Antigravity IDE.exe", appdata);
-        if std::path::Path::new(&path_ide).exists() {
-            let _ = std::process::Command::new(path_ide).spawn();
+        let path = if ide_type == "Antigravity 2.0" {
+            format!("{}\\Programs\\antigravity\\Antigravity.exe", appdata)
         } else {
-            let path_old = format!("{}\\Programs\\Antigravity\\Antigravity.exe", appdata);
-            let _ = std::process::Command::new(path_old).spawn();
-        }
+            format!("{}\\Programs\\Antigravity IDE\\Antigravity IDE.exe", appdata)
+        };
+        
+        let _ = std::process::Command::new(path).spawn();
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("antigravity-ide")
+        let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
+        let _ = std::process::Command::new(bin_name)
             .env("DONT_PROMPT_WSL_INSTALL", "1")
-            .spawn()
-            .or_else(|_| {
-                std::process::Command::new("antigravity")
-                    .env("DONT_PROMPT_WSL_INSTALL", "1")
-                    .spawn()
-            });
+            .spawn();
     }
 
     Ok(())

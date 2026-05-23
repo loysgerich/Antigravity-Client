@@ -23,6 +23,9 @@ interface ModelsResponse {
 
 const LS_TOKEN_KEY = 'ag_token';
 const LS_SERVER_KEY = 'ag_server_url';
+const LS_IDE_TYPE_KEY = 'ag_ide_type';
+const LS_CUSTOM_EXE_KEY = 'ag_custom_exe';
+const LS_CUSTOM_DB_KEY = 'ag_custom_db';
 
 const DEFAULT_SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://127.0.0.1:8045';
 
@@ -62,6 +65,14 @@ function formatModelName(id: string): string {
 export default function App() {
   const [token, setToken] = useState('');
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+  
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [ideType, setIdeType] = useState('Antigravity IDE');
+  const [customExePath, setCustomExePath] = useState('');
+  const [customDbPath, setCustomDbPath] = useState('');
+
+  // Main App State
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPercentages, setModelPercentages] = useState<Record<string, number>>({});
   const [totalCredits, setTotalCredits] = useState<number | null>(null);
@@ -69,7 +80,6 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
   const [ideConnecting, setIdeConnecting] = useState(false);
   const [ideSuccess, setIdeSuccess] = useState(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
@@ -80,8 +90,14 @@ export default function App() {
   useEffect(() => {
     const savedToken = localStorage.getItem(LS_TOKEN_KEY);
     const savedServer = localStorage.getItem(LS_SERVER_KEY);
-    
+    const savedIdeType = localStorage.getItem(LS_IDE_TYPE_KEY);
+    const savedExePath = localStorage.getItem(LS_CUSTOM_EXE_KEY);
+    const savedDbPath = localStorage.getItem(LS_CUSTOM_DB_KEY);
+
     if (savedServer) setServerUrl(savedServer);
+    if (savedIdeType) setIdeType(savedIdeType);
+    if (savedExePath) setCustomExePath(savedExePath);
+    if (savedDbPath) setCustomDbPath(savedDbPath);
     
     const url = savedServer || DEFAULT_SERVER_URL;
     
@@ -204,6 +220,9 @@ export default function App() {
       await invoke('inject_token_and_start_ide', {
         token: token,
         proxyUrl: `${serverUrl}/v1`,
+        ideType: ideType,
+        customExePath: customExePath || null,
+        customDbPath: customDbPath || null,
       });
       setIdeSuccess(true);
       setProxyRunning(true);
@@ -262,6 +281,9 @@ export default function App() {
 
   const handleSaveServerUrl = () => {
     localStorage.setItem(LS_SERVER_KEY, serverUrl);
+    localStorage.setItem(LS_IDE_TYPE_KEY, ideType);
+    localStorage.setItem(LS_CUSTOM_EXE_KEY, customExePath);
+    localStorage.setItem(LS_CUSTOM_DB_KEY, customDbPath);
     setShowSettings(false);
     checkServerHealth(serverUrl);
     if (token && connected) {
@@ -639,6 +661,36 @@ export default function App() {
             </div>
           )}
 
+          {/* IDE Selection */}
+          <div className="flex space-x-2 bg-black/40 p-1.5 rounded-xl border border-white/10 mb-6">
+            <button
+              onClick={() => {
+                setIdeType('Antigravity IDE');
+                localStorage.setItem(LS_IDE_TYPE_KEY, 'Antigravity IDE');
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                ideType === 'Antigravity IDE' 
+                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
+                  : 'text-gray-400 hover:text-gray-200 border border-transparent'
+              }`}
+            >
+              Antigravity IDE
+            </button>
+            <button
+              onClick={() => {
+                setIdeType('Antigravity 2.0');
+                localStorage.setItem(LS_IDE_TYPE_KEY, 'Antigravity 2.0');
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                ideType === 'Antigravity 2.0' 
+                  ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' 
+                  : 'text-gray-400 hover:text-gray-200 border border-transparent'
+              }`}
+            >
+              Antigravity 2.0
+            </button>
+          </div>
+
           <button
             onClick={handleConnect}
             disabled={ideConnecting}
@@ -649,13 +701,78 @@ export default function App() {
               <RefreshCw className="w-5 h-5 animate-spin" />
             ) : (
               <>
-                <span>{proxyRunning ? 'Reconnect IDE' : 'Connect to Antigravity IDE'}</span>
+                <span>{proxyRunning ? 'Reconnect IDE' : `Connect to ${ideType}`}</span>
                 <ExternalLink className="w-5 h-5" />
               </>
             )}
           </button>
         </div>
       </div>
+
+      {/* ─── Settings Modal ──────────────────────────────────── */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1a1c23] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <h2 className="text-xl font-bold text-white flex items-center space-x-2">
+                <Settings className="w-5 h-5 text-gray-400" />
+                <span>IDE Settings</span>
+              </h2>
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6 overflow-y-auto">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-300 block">
+                  Custom Executable Path (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder={`e.g. C:\\Apps\\${ideType}\\Antigravity.exe`}
+                  value={customExePath}
+                  onChange={(e) => {
+                    setCustomExePath(e.target.value);
+                    localStorage.setItem(LS_CUSTOM_EXE_KEY, e.target.value);
+                  }}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500">Leave blank to use default OS path.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-300 block">
+                  Custom DB / AppData Path (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. C:\\Data\\User\\globalStorage\\state.vscdb"
+                  value={customDbPath}
+                  onChange={(e) => {
+                    setCustomDbPath(e.target.value);
+                    localStorage.setItem(LS_CUSTOM_DB_KEY, e.target.value);
+                  }}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500">Path to state.vscdb for portable installations.</p>
+              </div>
+            </div>
+            
+            <div className="p-6 border-t border-white/10 flex justify-end">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="px-6 py-2.5 bg-white text-black font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

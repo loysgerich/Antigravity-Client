@@ -2,11 +2,21 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use crate::utils::protobuf;
 
-pub fn get_db_path() -> Result<PathBuf, String> {
+pub fn get_db_path(ide_type: &str, custom_db_path: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(path) = custom_db_path {
+        if !path.is_empty() {
+            let pb = PathBuf::from(path);
+            if pb.exists() {
+                return Ok(pb);
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
         let home = dirs::home_dir().ok_or("Failed to get home directory")?;
-        let new_path = home.join("Library/Application Support/Antigravity IDE/User/globalStorage/state.vscdb");
+        let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        let new_path = home.join(format!("Library/Application Support/{}/User/globalStorage/state.vscdb", subfolder));
         if new_path.exists() {
             return Ok(new_path);
         }
@@ -15,7 +25,8 @@ pub fn get_db_path() -> Result<PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").map_err(|_| "Failed to get APPDATA environment variable".to_string())?;
-        let new_path = PathBuf::from(&appdata).join("Antigravity IDE\\User\\globalStorage\\state.vscdb");
+        let subfolder = if ide_type == "Antigravity 2.0" { "antigravity" } else { "Antigravity IDE" };
+        let new_path = PathBuf::from(&appdata).join(format!("{}\\User\\globalStorage\\state.vscdb", subfolder));
         if new_path.exists() {
             return Ok(new_path);
         }
@@ -24,7 +35,8 @@ pub fn get_db_path() -> Result<PathBuf, String> {
     #[cfg(target_os = "linux")]
     {
         let home = dirs::home_dir().ok_or("Failed to get home directory")?;
-        let new_path = home.join(".config/Antigravity IDE/User/globalStorage/state.vscdb");
+        let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        let new_path = home.join(format!(".config/{}/User/globalStorage/state.vscdb", subfolder));
         if new_path.exists() {
             return Ok(new_path);
         }
@@ -67,7 +79,7 @@ pub fn inject_token_and_proxy(token: &str, proxy_url: &str) -> Result<String, St
 }
 
 /// Inject a real OAuth token (with separate access/refresh tokens) for IDE v2.0+
-pub fn inject_real_token(access_token: &str, refresh_token: &str, expiry: i64, proxy_url: &str) -> Result<String, String> {
+pub fn inject_real_token(access_token: &str, refresh_token: &str, expiry: i64, proxy_url: &str, ide_type: &str, custom_db_path: Option<&str>) -> Result<String, String> {
     let email = "proxy_user@antigravity";
 
     // ===== Method 1: System Keyring (for Antigravity >= 2.0.0) =====
@@ -78,7 +90,7 @@ pub fn inject_real_token(access_token: &str, refresh_token: &str, expiry: i64, p
     }
 
     // ===== Method 2: SQLite (for older versions) =====
-    let db_result = inject_to_sqlite(access_token, proxy_url, email, expiry);
+    let db_result = inject_to_sqlite(access_token, proxy_url, email, expiry, ide_type, custom_db_path);
     match &db_result {
         Ok(_) => eprintln!("[Client] Successfully wrote token to SQLite database"),
         Err(e) => eprintln!("[Client] SQLite write failed: {}", e),
@@ -321,8 +333,8 @@ fn days_to_date(mut days: i64) -> (i64, i64, i64) {
 }
 
 /// Legacy SQLite injection (for Antigravity < 2.0.0)
-fn inject_to_sqlite(token: &str, proxy_url: &str, email: &str, expiry: i64) -> Result<String, String> {
-    let db_path = get_db_path()?;
+fn inject_to_sqlite(token: &str, proxy_url: &str, email: &str, expiry: i64, ide_type: &str, custom_db_path: Option<&str>) -> Result<String, String> {
+    let db_path = get_db_path(ide_type, custom_db_path)?;
     if !db_path.exists() {
         return Err(format!("Antigravity IDE database not found at {:?}", db_path));
     }
