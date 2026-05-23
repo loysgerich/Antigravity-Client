@@ -19,8 +19,8 @@ async fn inject_token_and_start_ide(
     custom_exe_path: Option<String>,
     custom_db_path: Option<String>,
 ) -> Result<String, String> {
-    // 1. Kill any running Antigravity IDE first
-    kill_running_antigravity();
+    // 1. Kill any running instance of the selected IDE first
+    kill_running_antigravity(&ide_type);
 
     // 2. Stop any existing proxy
     stop_existing_proxy();
@@ -94,27 +94,27 @@ fn stop_existing_proxy() {
     PROXY_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// Kill any running Antigravity IDE processes
-fn kill_running_antigravity() {
+/// Kill running Antigravity processes for the selected IDE type
+fn kill_running_antigravity(ide_type: &str) {
     #[cfg(target_os = "macos")]
     {
+        let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "Antigravity"])
+            .args(["-f", app_name])
             .output();
     }
     #[cfg(target_os = "windows")]
     {
+        let exe_name = if ide_type == "Antigravity 2.0" { "Antigravity.exe" } else { "Antigravity IDE.exe" };
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "Antigravity IDE.exe"])
-            .output();
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "Antigravity.exe"])
+            .args(["/F", "/IM", exe_name])
             .output();
     }
     #[cfg(target_os = "linux")]
     {
+        let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
         let _ = std::process::Command::new("pkill")
-            .args(["-x", "antigravity"])
+            .args(["-x", bin_name])
             .output();
         let _ = std::process::Command::new("pkill")
             .args(["-f", "language_server"])
