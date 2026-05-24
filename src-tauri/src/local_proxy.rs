@@ -111,6 +111,28 @@ async fn proxy_request(
     let path = uri.path().to_string();
     let query = uri.query().map(|q| q.to_string());
 
+    // Intercept userinfo and tokeninfo to satisfy IDE authentication checks
+    if path.contains("userinfo") || path.contains("tokeninfo") {
+        eprintln!("[LocalProxy] Intercepting auth check: {}", path);
+        let mock_json = r#"{
+            "id": "12345",
+            "email": "proxy_user@antigravity",
+            "verified_email": true,
+            "picture": "https://lh3.googleusercontent.com/a/default-user",
+            "aud": "mock-aud",
+            "expires_in": 3600,
+            "scope": "https://www.googleapis.com/auth/cloud-platform"
+        }"#;
+
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .unwrap();
+        
+        return Ok(resp);
+    }
+
     // Build target URL
     let target_url = if let Some(ref qs) = query {
         format!("{}{}?{}", config.target_url, path, qs)
