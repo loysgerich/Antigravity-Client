@@ -73,5 +73,11 @@
 > 1. В старых версиях IDE на Linux мы принудительно захардкодили старый прокси (порт 8046) в бинарники, и IDE может игнорировать настройки из SQLite.
 > 2. Проверь наличие файлов `/usr/share/antigravity/resources/bin/language_server` и `/usr/share/antigravity/resources/app.asar`.
 > 3. Если внутри них есть строка `http://127.0.0.1:8046`, аккуратно пропатчи ее на `http://127.0.0.1:8047` бинарной заменой (не меняя длину строки!).
+>
+> **ШАГ 3: Зависания IDE (Deadlock в token_manager.rs)**
+> 1. IDE может отправлять 3 параллельных запроса при старте (например `listExperiments`, `loadCodeAssist`, `fetchAvailableModels`).
+> 2. Если Менеджер (на порту 8046) зависает и возвращает 503 Service Unavailable (или Timeout), значит проблема во взаимной блокировке (Deadlock) при получении токена.
+> 3. В `src-tauri/src/proxy/token_manager.rs` Менеджера используется `SingleFlight` для запросов `fetch_project_id`. Если запрос завис, он вешает все остальные ожидающие потоки. Необходимо убедиться, что `SingleFlight` при ошибке очищает карту: `self.load_code_assist_inflight.remove(&token.account_id);` а не держит мьютексы бесконечно.
+> 4. Также проверьте наличие таймаутов на всех `reqwest::Client` (в `project_resolver.rs` и `oauth.rs` используйте `.timeout(Duration::from_secs(2))`), чтобы запросы к Google Sandbox не висели вечно, так как JA3-эмуляция иногда ломает TLS-соединение.
 > 
 > Действуй!
