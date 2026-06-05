@@ -597,7 +597,8 @@ export default function App() {
                       {categoryModels.map(model => {
                         const pct = modelPercentages[model.id] 
                           ?? modelPercentages[model.id.replace('-thinking', '')]
-                          ?? modelPercentages[model.id.replace(/-high|-medium|-low/g, '')];
+                          ?? modelPercentages[model.id.replace(/-high|-medium|-low/g, '')]
+                          ?? modelPercentages[model.id.replace(/-high|-medium/g, '-low')];
                         return (
                           <div
                             key={model.id}
