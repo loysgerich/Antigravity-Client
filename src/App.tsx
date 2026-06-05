@@ -38,13 +38,14 @@ const MODEL_CATEGORIES: Record<string, { label: string; color: string; icon: str
 };
 
 const IDE_ALLOWED_MODELS = [
+  'gemini-3.5-flash-medium',
+  'gemini-3.5-flash-high',
+  'gemini-3.5-flash-low',
   'gemini-3.1-pro-high',
   'gemini-3.1-pro-low',
   'claude-sonnet-4-6-thinking',
   'claude-opus-4-6-thinking',
-  'gpt-oss-120b-medium',
-  'gemini-3.5-flash-high',
-  'gemini-3.5-flash-low'
+  'gpt-oss-120b-medium'
 ];
 
 function getModelCategory(modelId: string) {
