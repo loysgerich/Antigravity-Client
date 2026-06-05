@@ -595,7 +595,9 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {categoryModels.map(model => {
-                        const pct = modelPercentages[model.id] ?? modelPercentages[model.id.replace('-thinking', '')];
+                        const pct = modelPercentages[model.id] 
+                          ?? modelPercentages[model.id.replace('-thinking', '')]
+                          ?? modelPercentages[model.id.replace(/-high|-medium|-low/g, '')];
                         return (
                           <div
                             key={model.id}
