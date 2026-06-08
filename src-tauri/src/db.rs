@@ -2,6 +2,32 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use crate::utils::protobuf;
 
+#[cfg(target_os = "linux")]
+fn get_wsl_windows_appdata() -> Option<PathBuf> {
+    if std::env::var("WSL_DISTRO_NAME").is_err() {
+        return None;
+    }
+    let output = std::process::Command::new("cmd.exe")
+        .args(&["/c", "echo %APPDATA%"])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let appdata = stdout.trim();
+    if appdata.is_empty() || appdata == "%APPDATA%" {
+        return None;
+    }
+    let wslpath_output = std::process::Command::new("wslpath")
+        .args(&["-u", appdata])
+        .output()
+        .ok()?;
+    let wsl_path = String::from_utf8_lossy(&wslpath_output.stdout);
+    let wsl_path = wsl_path.trim();
+    if wsl_path.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(wsl_path))
+}
+
 pub fn get_db_path(ide_type: &str, custom_db_path: Option<&str>) -> Result<PathBuf, String> {
     if let Some(path) = custom_db_path {
         if !path.is_empty() {
@@ -34,8 +60,18 @@ pub fn get_db_path(ide_type: &str, custom_db_path: Option<&str>) -> Result<PathB
     }
     #[cfg(target_os = "linux")]
     {
-        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
         let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+
+        if ide_type == "Antigravity IDE" {
+            if let Some(wsl_appdata) = get_wsl_windows_appdata() {
+                let win_path = wsl_appdata.join(subfolder).join("User/globalStorage/state.vscdb");
+                if win_path.exists() {
+                    return Ok(win_path);
+                }
+            }
+        }
+
+        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
         let new_path = home.join(format!(".config/{}/User/globalStorage/state.vscdb", subfolder));
         if new_path.exists() {
             return Ok(new_path);
@@ -96,6 +132,13 @@ pub fn inject_real_token(access_token: &str, refresh_token: &str, expiry: i64, p
         Err(e) => eprintln!("[Client] SQLite write failed: {}", e),
     }
 
+    // ===== Method 3: settings.json =====
+    let settings_result = inject_to_settings(proxy_url, ide_type);
+    match &settings_result {
+        Ok(_) => eprintln!("[Client] Successfully wrote proxyBaseUrl to settings.json"),
+        Err(e) => eprintln!("[Client] settings.json write failed: {}", e),
+    }
+
     if keyring_result.is_ok() || db_result.is_ok() {
         Ok("Token injection successful".to_string())
     } else {
@@ -105,6 +148,36 @@ pub fn inject_real_token(access_token: &str, refresh_token: &str, expiry: i64, p
             db_result.err()
         ))
     }
+}
+
+/// Inject proxyBaseUrl into settings.json
+pub fn inject_to_settings(proxy_url: &str, ide_type: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+        let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        let settings_path = home.join(format!(".config/{}/User/settings.json", subfolder));
+        
+        let mut settings: serde_json::Value = if settings_path.exists() {
+            let content = std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
+            serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+        } else {
+            if let Some(parent) = settings_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            serde_json::json!({})
+        };
+
+        if let Some(obj) = settings.as_object_mut() {
+            // Force the URL to include /v1 since the IDE proxy configuration usually requires it
+            let final_url = if proxy_url.ends_with("/v1") { proxy_url.to_string() } else { format!("{}/v1", proxy_url) };
+            obj.insert("antigravity.proxyBaseUrl".to_string(), serde_json::json!(final_url));
+        }
+
+        let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+        std::fs::write(settings_path, content).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Write a real OAuth token to system keyring as raw JSON
@@ -157,6 +230,16 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
         if !output.status.success() {
             let err_msg = String::from_utf8_lossy(&output.stderr);
             return Err(format!("secret-tool failed: {}", err_msg.trim()));
+        }
+
+        if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
+            let _ = Command::new("cmd.exe")
+                .args(["/c", "cmdkey", "/delete:gemini:antigravity"])
+                .output();
+            let _ = Command::new("cmd.exe")
+                .args(["/c", "cmdkey", "/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
+                .output();
+            eprintln!("[Client] Also injected credential into Windows Credential Manager via WSL");
         }
     }
 
@@ -252,6 +335,16 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
             let err_msg = String::from_utf8_lossy(&output.stderr);
             return Err(format!("secret-tool failed: {}", err_msg.trim()));
         }
+
+        if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
+            let _ = Command::new("cmd.exe")
+                .args(["/c", "cmdkey", "/delete:gemini:antigravity"])
+                .output();
+            let _ = Command::new("cmd.exe")
+                .args(["/c", "cmdkey", "/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
+                .output();
+            eprintln!("[Client] Also injected old-format credential into Windows Credential Manager via WSL");
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -342,15 +435,17 @@ fn inject_to_sqlite(token: &str, proxy_url: &str, email: &str, expiry: i64, ide_
     let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open DB: {}", e))?;
 
     // Create OAuth info (simulated for the client)
-    let oauth_info = protobuf::create_oauth_info(
-        token,
-        token, // refresh token same as access token
-        expiry,
-        false, // gcp tos
-        None,
-        Some(email),
-    );
-    let outer_b64 = protobuf::create_unified_state_entry("oauthTokenInfoSentinelKey", &oauth_info);
+    let oauth_info = protobuf::create_oauth_info(token, token, expiry, false, None, Some(email));
+    
+    // Create auth state as "loggedIn" — without this, IDE shows "authentication error"
+    // because a stale "loginError" authState persists from previous failed attempts
+    let auth_state = protobuf::create_auth_state_logged_in();
+    
+    // Write BOTH entries into a single oauthToken field
+    let outer_b64 = protobuf::create_multi_unified_state_entry(&[
+        ("oauthTokenInfoSentinelKey", &oauth_info),
+        ("authStateWithContextSentinelKey", &auth_state),
+    ]);
     
     conn.execute(
         "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",

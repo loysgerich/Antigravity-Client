@@ -390,3 +390,32 @@ pub fn create_string_value_payload(value: &str) -> Vec<u8> {
 pub fn create_minimal_user_status_payload(email: &str) -> Vec<u8> {
     [encode_string_field(3, email), encode_string_field(7, email)].concat()
 }
+
+/// Create a unified state entry with MULTIPLE sentinel key/payload pairs.
+/// This is needed for the oauthToken field which contains both:
+///   - oauthTokenInfoSentinelKey (the token)  
+///   - authStateWithContextSentinelKey (the login state)
+/// Without setting authState to "loggedIn", IDE shows authentication error.
+pub fn create_multi_unified_state_entry(entries: &[(&str, &[u8])]) -> String {
+    use base64::{engine::general_purpose, Engine as _};
+
+    let mut topic_bytes = Vec::new();
+    for (sentinel_key, payload) in entries {
+        let row = encode_string_field(1, &general_purpose::STANDARD.encode(payload));
+        let data_entry = [
+            encode_string_field(1, sentinel_key),
+            encode_len_delim_field(2, &row),
+        ]
+        .concat();
+        topic_bytes.extend(encode_len_delim_field(1, &data_entry));
+    }
+
+    general_purpose::STANDARD.encode(topic_bytes)
+}
+
+/// Create auth state JSON that tells IDE the user is logged in.
+pub fn create_auth_state_logged_in() -> Vec<u8> {
+    let json = r#"{"state":"loggedIn","context":{"project":"","showProjectError":false,"errorMessage":"","ineligibleMessage":"","verificationUrl":"","isGcpTos":false,"browserOpenFailed":false,"appealUrl":"","appealLinkText":""}}"#;
+    json.as_bytes().to_vec()
+}
+

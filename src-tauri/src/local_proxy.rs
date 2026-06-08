@@ -108,25 +108,108 @@ async fn proxy_request(
 ) -> Result<hyper::Response<http_body_util::Full<bytes::Bytes>>, Infallible> {
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let path = uri.path().to_string();
+    let mut path = uri.path().to_string();
     let query = uri.query().map(|q| q.to_string());
 
-    // Intercept userinfo and tokeninfo to satisfy IDE authentication checks
-    if path.contains("userinfo") || path.contains("tokeninfo") {
-        eprintln!("[LocalProxy] Intercepting auth check: {}", path);
+    // Normalize path
+    while path.contains("//") {
+        path = path.replace("//", "/");
+    }
+    if path.starts_with("/v1/") {
+        path = path[3..].to_string(); // Removes "/v1", leaving "/..."
+    }
+    if path.starts_with("/v1internal:") {
+        path = path.replace("v1internal:", "v1internal/");
+    }
+
+    // Add CORS headers to all responses
+    let cors_origin = req.headers().get("origin").map(|v| v.to_str().unwrap_or("*")).unwrap_or("*").to_string();
+
+    if method == hyper::Method::OPTIONS {
+        eprintln!("[LocalProxy] Intercepting OPTIONS request for CORS: {}", path);
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Access-Control-Allow-Origin", cors_origin)
+            .header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            .header("Access-Control-Allow-Headers", "*")
+            .header("Access-Control-Max-Age", "86400")
+            .body(http_body_util::Full::new(bytes::Bytes::from("")))
+            .unwrap();
+        return Ok(resp);
+    }
+
+    if path.contains("token") && !path.contains("tokeninfo") {
+        eprintln!("[LocalProxy] Intercepting auth token refresh: {}", path);
         let mock_json = r#"{
-            "id": "12345",
-            "email": "proxy_user@antigravity",
-            "verified_email": true,
-            "picture": "https://lh3.googleusercontent.com/a/default-user",
-            "aud": "mock-aud",
-            "expires_in": 3600,
-            "scope": "https://www.googleapis.com/auth/cloud-platform"
+            "access_token": "ya29.proxy_managed_token_do_not_use",
+            "expires_in": 3599,
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
+            "token_type": "Bearer",
+            "id_token": "mock_id_token"
         }"#;
 
         let resp = hyper::Response::builder()
             .status(200)
             .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", &cors_origin)
+            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .unwrap();
+        
+        return Ok(resp);
+    }
+
+    // Intercept userinfo and tokeninfo to satisfy IDE authentication checks
+    if path.contains("tokeninfo") {
+        eprintln!("[LocalProxy] Intercepting auth check: {}", path);
+        let mock_json = r#"{
+            "issued_to": "antigravity-client",
+            "audience": "antigravity-client",
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
+            "expires_in": 3599,
+            "access_type": "offline"
+        }"#;
+
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", cors_origin)
+            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .unwrap();
+        
+        return Ok(resp);
+    }
+
+    if path.contains("userinfo") {
+        eprintln!("[LocalProxy] Intercepting auth check: {}", path);
+        let mock_json = r#"{
+            "id": "1234567890",
+            "email": "local@antigravity",
+            "verified_email": true,
+            "name": "Antigravity Local User",
+            "given_name": "Antigravity",
+            "family_name": "Local",
+            "picture": "https://lh3.googleusercontent.com/a/default-user",
+            "locale": "en"
+        }"#;
+
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", &cors_origin)
+            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .unwrap();
+        
+        return Ok(resp);
+    }
+
+    if path.contains("fetchAdminControls") {
+        eprintln!("[LocalProxy] Intercepting fetchAdminControls to avoid 400: {}", path);
+        let mock_json = r#"{}"#;
+
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", &cors_origin)
             .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
             .unwrap();
         
@@ -134,10 +217,23 @@ async fn proxy_request(
     }
 
     // Build target URL
-    let target_url = if let Some(ref qs) = query {
-        format!("{}{}?{}", config.target_url, path, qs)
+    let mut upstream_path = if path.starts_with("/v1/") {
+        path.trim_start_matches("/v1")
     } else {
-        format!("{}{}", config.target_url, path)
+        &path
+    };
+
+    // Strip duplicate leading slashes caused by binary padding
+    while upstream_path.starts_with("//") {
+        upstream_path = &upstream_path[1..];
+    }
+    // Remove trailing slashes
+    let upstream_path = upstream_path.trim_end_matches('/');
+
+    let target_url = if let Some(ref qs) = query {
+        format!("{}{}{}?{}", config.target_url, if upstream_path.starts_with('/') { "" } else { "/" }, upstream_path, qs)
+    } else {
+        format!("{}{}{}", config.target_url, if upstream_path.starts_with('/') { "" } else { "/" }, upstream_path)
     };
 
     eprintln!("[LocalProxy] {} {} -> {}", method, uri, target_url);
@@ -189,7 +285,9 @@ async fn proxy_request(
     eprintln!("[LocalProxy] Response: {}", status);
 
     // Build the hyper response
-    let mut builder = hyper::Response::builder().status(status.as_u16());
+    let mut builder = hyper::Response::builder()
+        .status(status.as_u16())
+        .header("Access-Control-Allow-Origin", &cors_origin);
 
     // Copy response headers
     for (name, value) in response.headers() {

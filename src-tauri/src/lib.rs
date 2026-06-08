@@ -53,11 +53,9 @@ async fn inject_token_and_start_ide(
 
     eprintln!("[Client] Local proxy started successfully");
 
-    // 5. Write a fake ya29.* token to keyring so IDE's internal auth check passes.
-    // The actual authentication is handled by our proxy → Manager pipeline.
     eprintln!("[Client] Injecting proxy token into IDE keyring...");
     db::inject_real_token(
-        "ya29.proxy_managed_token_do_not_use",
+        &token,
         "proxy_managed_refresh_token",
         4070908800i64,
         "http://127.0.0.1:8047/v1", // Route IDE traffic to our local proxy
@@ -151,9 +149,20 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
     }
     #[cfg(target_os = "linux")]
     {
-        let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
+        // Inject settings.json before launching
+        let _ = crate::db::inject_to_settings(
+            "http://127.0.0.1:8047/v1",
+            ide_type
+        );
+
+        let bin_name = if ide_type == "Antigravity 2.0" { 
+            "antigravity" 
+        } else { 
+            "/home/yaaaa/projects/Antigravity IDE Linux/antigravity-ide" 
+        };
         let _ = std::process::Command::new(bin_name)
             .env("DONT_PROMPT_WSL_INSTALL", "1")
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
             .spawn();
     }
 
