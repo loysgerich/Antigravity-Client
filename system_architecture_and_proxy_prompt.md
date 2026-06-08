@@ -81,3 +81,44 @@
 > 4. Также проверьте наличие таймаутов на всех `reqwest::Client` (в `project_resolver.rs` и `oauth.rs` используйте `.timeout(Duration::from_secs(2))`), чтобы запросы к Google Sandbox не висели вечно, так как JA3-эмуляция иногда ломает TLS-соединение.
 > 
 > Действуй!
+
+---
+
+## 🚀 Новые патчи и фиксы (Июнь 2026)
+
+В процессе доработки мы столкнулись с рядом неочевидных проблем, которые были успешно решены. Вот шпаргалка по ним:
+
+### 1. Проблема с CORS во фронтенде (Electron UI)
+*Симптом:* Приложение падает с экраном "There was an unexpected issue setting up your account". В логах бэкенда при этом "Auth succeeded".
+*Причина:* Chromium внутри Electron делает предзапросы `OPTIONS` (Preflight) к нашему локальному прокси `http://127.0.0.1:8047`, а также ожидает заголовок `Access-Control-Allow-Origin: *` в ответах.
+*Решение:* Прокси-сервер (`src-tauri/src/local_proxy.rs`) должен обрабатывать метод `OPTIONS` (возвращать 200 OK) и добавлять заголовок `Access-Control-Allow-Origin: *` ко всем своим ответах на перехваченные роуты (userinfo, tokeninfo, fetchAdminControls, token).
+
+### 2. Прямые запросы к Google API в обход прокси
+*Симптом:* Тот же "unexpected issue setting up your account" даже с настроенным CORS.
+*Причина:* Помимо `cloudcode.googleapis.com`, фронтенд IDE (`main.js`) и бэкенд (`language_server_linux_x64`) содержат захардкоженные URL `https://www.googleapis.com` и `https://oauth2.googleapis.com`. Они отправляют туда наш фейковый токен `ya29.proxy_managed...` напрямую в обход прокси, Google возвращает 401 Unauthorized, и интерфейс падает.
+*Решение:* Бинарный патчинг (с сохранением длины строки) `main.js` и `language_server_linux_x64`.
+* `https://www.googleapis.com` (26 байт) -> `http://127.0.0.1:8047/////` (26 байт)
+* `https://oauth2.googleapis.com` (29 байт) -> `http://127.0.0.1:8047////////` (29 байт)
+(Двойные слеши автоматически игнорируются при парсинге в `local_proxy.rs`).
+
+### 3. Зависание IDE в фоне (Single-Instance Electron)
+*Симптом:* Изменения конфига или CORS не применяются, при нажатии "Connect" вылезает та же самая старая ошибка. В папке логов IDE не появляются новые папки запуска.
+*Причина:* Antigravity IDE работает как Electron-приложение (Single-instance). Если оно зависло или упало в ошибку, запуск нового процесса `antigravity` просто передает фокус зависшему невидимому окну.
+*Решение:* Принудительно завершить процесс: `pkill -f antigravity`.
+
+### 4. Невидимая мышь в клиенте (Баг WSLg Wayland)
+*Симптом:* Tauri-приложение запускается из WSL, но мышь над ним не отображается.
+*Решение:* Запускать клиент с принудительным использованием X11 бэкенда: `GDK_BACKEND=x11 npm run tauri dev`.
+
+### 5. Блокировка базы SQLite (database is locked)
+*Симптом:* Ошибка `database is locked` при попытке инжекта токенов в `state.vscdb`.
+*Причина:* IDE оставляет базу в режиме `WAL` (Write-Ahead Logging).
+*Решение:* В `db.rs` перед записью выполнять команду `PRAGMA journal_mode=DELETE;`.
+
+### 6. Ошибка макроса Tauri
+*Симптом:* Ошибка компиляции `error: expected item` в `lib.rs`.
+*Причина:* Макрос `#[tauri::command]` во 2-ой версии Tauri несовместим с модификатором `pub` для асинхронных функций.
+*Решение:* Использовать `async fn` без модификатора `pub`.
+
+### 7. Мокирование состояния авторизации в базе
+В `state.vscdb` необходимо инжектить не только сам токен (через ключ `oauthTokenInfoSentinelKey`), но и обязательно статус `authState: "loggedIn"` (через ключ `authStateWithContextSentinelKey` внутри того же мульти-стейта). Без этого IDE показывает окно приветствия "Sign In" вместо работы.
