@@ -128,52 +128,108 @@ fn kill_running_antigravity(ide_type: &str) {
 
 /// Start Antigravity IDE
 fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Result<(), String> {
+    let mut child_opt = None;
+
     if let Some(path) = custom_exe_path {
         if !path.is_empty() {
-            let _ = std::process::Command::new(path).spawn();
-            return Ok(());
+            child_opt = std::process::Command::new(path).spawn().ok();
         }
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
-        let _ = std::process::Command::new("open")
-            .args(["-a", app_name])
-            .spawn();
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
-        let path = if ide_type == "Antigravity 2.0" {
-            format!("{}\\Programs\\antigravity\\Antigravity.exe", appdata)
-        } else {
-            format!("{}\\Programs\\Antigravity IDE\\Antigravity IDE.exe", appdata)
-        };
-        
-        let _ = std::process::Command::new(path).spawn();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        // Inject settings.json before launching
-        let _ = crate::db::inject_to_settings(
-            "http://127.0.0.1:8047/v1",
-            ide_type
-        );
+    if child_opt.is_none() {
+        #[cfg(target_os = "macos")]
+        {
+            let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+            child_opt = std::process::Command::new("open")
+                .args(["-n", "-a", app_name])
+                .spawn().ok();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+            let path = if ide_type == "Antigravity 2.0" {
+                format!(r"{}\Programs\antigravity\Antigravity.exe", appdata)
+            } else {
+                format!(r"{}\Programs\Antigravity IDE\Antigravity IDE.exe", appdata)
+            };
+            
+            child_opt = std::process::Command::new(path).spawn().ok();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // Inject settings.json before launching
+            let _ = crate::db::inject_to_settings(
+                "http://127.0.0.1:8047/v1",
+                ide_type
+            );
 
-        let bin_name = if ide_type == "Antigravity 2.0" { 
-            "antigravity" 
-        } else { 
-            "/home/yaaaa/projects/Antigravity IDE Linux/antigravity-ide" 
-        };
-        let _ = std::process::Command::new(bin_name)
-            .env("DONT_PROMPT_WSL_INSTALL", "1")
-            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
-            .spawn();
+            let bin_name = if ide_type == "Antigravity 2.0" { 
+                "antigravity" 
+            } else { 
+                "/home/yaaaa/projects/Antigravity IDE Linux/antigravity-ide" 
+            };
+            child_opt = std::process::Command::new(bin_name)
+                .env("DONT_PROMPT_WSL_INSTALL", "1")
+                .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+                .spawn().ok();
+        }
     }
+
+    let ide_type_clone = ide_type.to_string();
+    std::thread::spawn(move || {
+        // Wait for the spawned process to exit to reap zombies
+        if let Some(mut child) = child_opt {
+            let _ = child.wait();
+        }
+
+        #[cfg(target_os = "windows")]
+        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity.exe" } else { "Antigravity IDE.exe" };
+        #[cfg(target_os = "macos")]
+        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        #[cfg(target_os = "linux")]
+        let exe_name = if ide_type_clone == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
+
+        loop {
+            let is_running = {
+                #[cfg(target_os = "windows")]
+                {
+                    if let Ok(output) = std::process::Command::new("tasklist").args(&["/FI", &format!("IMAGENAME eq {}", exe_name), "/NH"]).output() {
+                        String::from_utf8_lossy(&output.stdout).contains(exe_name)
+                    } else {
+                        true // fallback if tasklist fails
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    // Use pgrep, but exclude zombies (-z) if possible, or just standard match since we already reaped our child
+                    if let Ok(output) = std::process::Command::new("pgrep").arg("-x").arg(exe_name).output() {
+                        output.status.success()
+                    } else {
+                        true // fallback if pgrep fails
+                    }
+                }
+            };
+
+            // Also check if proxy was stopped manually by user (PROXY_RUNNING is false)
+            let proxy_running = crate::PROXY_RUNNING.load(std::sync::atomic::Ordering::SeqCst);
+
+            if !is_running || !proxy_running {
+                if proxy_running {
+                    eprintln!("[Client] IDE process exited. Stopping proxy.");
+                    crate::stop_existing_proxy();
+                }
+                break;
+            }
+
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    });
 
     Ok(())
 }
+
+
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { 
   Shield, Zap, ExternalLink, RefreshCw, LogIn, Key, 
   Server, CheckCircle, XCircle, Cpu, Globe, Settings,
-  Wifi, WifiOff, LogOut, Square, Activity
+  Wifi, WifiOff, LogOut, Square, Activity, ChevronDown
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -20,6 +20,92 @@ interface ModelsResponse {
 }
 
 // ─── Constants ────────────────────────────────────────────────────
+
+
+const LS_LANG_KEY = 'ag_lang';
+
+const dict = {
+  en: {
+    secureClient: "{t.secureClient}",
+    serverUrl: "Server URL",
+    accessToken: "Access Token",
+    connect: "Connect",
+    connecting: "Connecting...",
+    connected: "Connected",
+    ping: "Ping",
+    status: "Status",
+    active: "Active",
+    tokenAuth: "Token authenticated",
+    models: "Models",
+    availModels: "Available AI models",
+    credits: "Credits",
+    totalCredits: "Total combined credits",
+    server: "Server",
+    proxyPing: "Proxy endpoint ping",
+    ready: "Ready to Code?",
+    connectToIDE: "Connect to Antigravity IDE with your secure proxy token. A local proxy on port 8046 will route all IDE requests through the Manager.",
+    localProxy: "Local Proxy Active on",
+    stop: "Stop",
+    ideLaunched: "IDE launched successfully! Proxy running.",
+    reconnect: "Reconnect IDE",
+    connectTo: "Connect to",
+    logout: "Logout",
+    settings: "Settings",
+    ideSettings: "IDE Settings",
+    customExe: "Custom Executable Path (Optional)",
+    leaveBlank: "Leave blank to use default OS path.",
+    customDb: "Custom DB / AppData Path (Optional)",
+    pathToVscdb: "Path to state.vscdb for portable installations.",
+    done: "Done",
+    saveReconnect: "{t.saveReconnect}",
+    proxyUrlForIde: "{t.proxyUrlForIde}",
+    error: "Error",
+    offline: "Offline",
+    availableModelsTitle: "Available Models",
+    modelsCount: "models",
+    serverConfig: "Server Configuration"
+  },
+  ru: {
+    secureClient: "Безопасный прокси-клиент",
+    serverUrl: "Адрес сервера",
+    accessToken: "Токен доступа",
+    connect: "Подключиться",
+    connecting: "Подключение...",
+    connected: "Подключено",
+    ping: "Пинг",
+    status: "Статус",
+    active: "Активен",
+    tokenAuth: "Токен подтвержден",
+    models: "Модели",
+    availModels: "Доступные ИИ-модели",
+    credits: "Кредиты",
+    totalCredits: "Общий баланс кредитов",
+    server: "Сервер",
+    proxyPing: "Пинг до прокси",
+    ready: "Готовы программировать?",
+    connectToIDE: "Подключите Antigravity IDE, используя ваш токен. Локальный прокси на порту 8046 перенаправит все запросы IDE через Менеджер.",
+    localProxy: "Локальный прокси запущен на",
+    stop: "Остановить",
+    ideLaunched: "IDE успешно запущена! Прокси работает.",
+    reconnect: "Переподключить IDE",
+    connectTo: "Подключить к",
+    logout: "Выйти",
+    settings: "Настройки",
+    ideSettings: "Настройки IDE",
+    customExe: "Путь к исполняемому файлу (Опционально)",
+    leaveBlank: "Оставьте пустым для стандартного пути ОС.",
+    customDb: "Путь к БД / AppData (Опционально)",
+    pathToVscdb: "Путь к state.vscdb для портативных версий.",
+    done: "Готово",
+    saveReconnect: "Сохранить и переподключиться",
+    proxyUrlForIde: "URL прокси для IDE:",
+    error: "Ошибка",
+    offline: "Не в сети",
+    availableModelsTitle: "Доступные модели",
+    modelsCount: "моделей",
+    serverConfig: "Настройки сервера"
+  }
+};
 
 const LS_TOKEN_KEY = 'ag_token';
 const LS_SERVER_KEY = 'ag_server_url';
@@ -64,6 +150,32 @@ function formatModelName(id: string): string {
 // ─── App Component ────────────────────────────────────────────────
 
 export default function App() {
+    const [lang, setLang] = useState<'en'|'ru'>('en');
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
+  const t = dict[lang];
+
+  useEffect(() => {
+    const savedLang = localStorage.getItem(LS_LANG_KEY) as 'en'|'ru';
+    if (savedLang) setLang(savedLang);
+  }, []);
+
+  const changeLang = (newLang: 'en'|'ru') => {
+    setLang(newLang);
+    localStorage.setItem(LS_LANG_KEY, newLang);
+    setShowLangDropdown(false);
+  };
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!(e.target as Element).closest('.lang-dropdown')) {
+        setShowLangDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const [token, setToken] = useState('');
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   
@@ -348,7 +460,7 @@ export default function App() {
               Antigravity
             </h1>
             <p className="text-sm text-gray-400 mt-2 text-center">
-              Secure proxy client
+              {t.secureClient}
             </p>
           </div>
 
@@ -367,7 +479,7 @@ export default function App() {
                   value={serverUrl}
                   onChange={(e) => setServerUrl(e.target.value.replace(/\/+$/, ''))}
                   className="block w-full pl-10 pr-12 py-3 bg-black/40 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all outline-none text-sm"
-                  placeholder="http://server:8045"
+                  placeholder={lang === "ru" ? "http://сервер:8045" : "http://server:8045"}
                 />
                 <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
                   {serverOnline === true && <Wifi className="h-4 w-4 text-emerald-400" />}
@@ -442,7 +554,36 @@ export default function App() {
       <div className="w-full max-w-4xl relative z-10">
         {/* ─── Header ──────────────────────────────────────────── */}
         <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-3">
+            {/* Language Dropdown */}
+            <div className="relative lang-dropdown">
+              <button
+                onClick={() => setShowLangDropdown(!showLangDropdown)}
+                className="flex items-center space-x-1 px-3 h-10 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5 text-sm font-medium text-gray-300"
+                title="Change Language"
+              >
+                <Globe className="w-4 h-4" />
+                <span>{lang.toUpperCase()}</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${showLangDropdown ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {showLangDropdown && (
+                <div className="absolute right-0 mt-2 w-32 bg-[#1a1c23] border border-white/10 rounded-xl shadow-2xl py-1 z-50 overflow-hidden">
+                  <button
+                    onClick={() => changeLang('en')}
+                    className={`w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors ${lang === 'en' ? 'text-blue-400 font-medium' : 'text-gray-300'}`}
+                  >
+                    English (EN)
+                  </button>
+                  <button
+                    onClick={() => changeLang('ru')}
+                    className={`w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors ${lang === 'ru' ? 'text-blue-400 font-medium' : 'text-gray-300'}`}
+                  >
+                    Русский (RU)
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
               <Shield className="w-5 h-5 text-white" />
             </div>
@@ -450,7 +591,7 @@ export default function App() {
               <h2 className="text-xl font-bold text-white">Antigravity Client</h2>
               <div className="flex items-center space-x-2 text-xs text-gray-400">
                 <CheckCircle className="w-3 h-3 text-emerald-400" />
-                <span>Connected. Ping: {ping !== null ? `${ping} ms` : '...'}</span>
+                <span>{t.connected}. {t.ping}: {ping !== null ? `${ping} ms` : '...'}</span>
               </div>
             </div>
           </div>
@@ -475,7 +616,7 @@ export default function App() {
               className="text-sm px-3 py-2 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-lg transition-colors border border-white/5 flex items-center space-x-1"
             >
               <LogOut className="w-4 h-4" />
-              <span>Logout</span>
+              <span>{t.logout}</span>
             </button>
           </div>
         </div>
@@ -485,7 +626,7 @@ export default function App() {
           <div className="mb-6 backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-5 animate-in fade-in slide-in-from-top-2">
             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center space-x-2">
               <Server className="w-4 h-4" />
-              <span>Server Configuration</span>
+              <span>{t.serverConfig}</span>
             </h3>
             <div className="flex space-x-3">
               <input
@@ -493,17 +634,17 @@ export default function App() {
                 value={serverUrl}
                 onChange={(e) => setServerUrl(e.target.value.replace(/\/+$/, ''))}
                 className="flex-1 px-4 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white text-sm focus:ring-2 focus:ring-blue-500/50 outline-none"
-                placeholder="http://server:8045"
+                placeholder={lang === "ru" ? "http://сервер:8045" : "http://server:8045"}
               />
               <button
                 onClick={handleSaveServerUrl}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-colors"
               >
-                Save & Reconnect
+                {t.saveReconnect}
               </button>
             </div>
             <div className="mt-3 flex items-center space-x-4 text-xs text-gray-500">
-              <span>Proxy URL for IDE: <code className="text-gray-400">{serverUrl}/v1</code></span>
+              <span>{t.proxyUrlForIde} <code className="text-gray-400">{serverUrl}/v1</code></span>
             </div>
           </div>
         )}
@@ -513,7 +654,7 @@ export default function App() {
           <div className="mb-6 text-red-400 text-sm bg-red-400/10 p-4 rounded-xl border border-red-400/20 flex items-start space-x-3">
             <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-medium">Error</p>
+              <p className="font-medium">{t.error}</p>
               <p className="text-red-300/80 mt-1">{error}</p>
             </div>
           </div>
@@ -529,10 +670,10 @@ export default function App() {
               <div className="p-2 bg-emerald-500/20 rounded-lg border border-emerald-500/30">
                 <Wifi className="w-4 h-4 text-emerald-400" />
               </div>
-              <h3 className="text-sm font-medium text-gray-300">Status</h3>
+              <h3 className="text-sm font-medium text-gray-300">{t.status}</h3>
             </div>
-            <div className="text-2xl font-bold text-emerald-400 mb-1">Active</div>
-            <div className="text-xs text-gray-500">Token authenticated</div>
+            <div className="text-2xl font-bold text-emerald-400 mb-1">{t.active}</div>
+            <div className="text-xs text-gray-500">{t.tokenAuth}</div>
           </div>
 
           {/* Models Count Card */}
@@ -542,10 +683,10 @@ export default function App() {
               <div className="p-2 bg-blue-500/20 rounded-lg border border-blue-500/30">
                 <Cpu className="w-4 h-4 text-blue-400" />
               </div>
-              <h3 className="text-sm font-medium text-gray-300">Models</h3>
+              <h3 className="text-sm font-medium text-gray-300">{t.models}</h3>
             </div>
             <div className="text-2xl font-bold text-white mb-1">{models.length}</div>
-            <div className="text-xs text-gray-500">Available AI models</div>
+            <div className="text-xs text-gray-500">{t.availModels}</div>
           </div>
 
           {/* Credits Card */}
@@ -557,7 +698,7 @@ export default function App() {
                   <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/30">
                     <Zap className="w-4 h-4 text-amber-400" />
                   </div>
-                  <h3 className="text-sm font-medium text-gray-300">Credits</h3>
+                  <h3 className="text-sm font-medium text-gray-300">{t.credits}</h3>
                 </div>
                 <div className="flex items-center">
                   <label className="relative inline-flex items-center cursor-pointer" title="Enable Credit Overages">
@@ -567,7 +708,7 @@ export default function App() {
                 </div>
               </div>
               <div className="text-2xl font-bold text-amber-400 mb-1">{totalCredits !== null ? totalCredits : '-'}</div>
-              <div className="text-xs text-gray-500">Total combined credits</div>
+              <div className="text-xs text-gray-500">{t.totalCredits}</div>
             </div>
           </div>
 
@@ -578,7 +719,7 @@ export default function App() {
               <div className="p-2 bg-purple-500/20 rounded-lg border border-purple-500/30">
                 <Server className="w-4 h-4 text-purple-400" />
               </div>
-              <h3 className="text-sm font-medium text-gray-300">Server</h3>
+              <h3 className="text-sm font-medium text-gray-300">{t.server}</h3>
             </div>
             <div className={`text-2xl font-bold mb-1 ${
               ping === null ? 'text-red-400' :
@@ -587,7 +728,7 @@ export default function App() {
             }`}>
               {ping !== null ? `${ping} ms` : 'Offline'}
             </div>
-            <div className="text-xs text-gray-500">Proxy endpoint ping</div>
+            <div className="text-xs text-gray-500">{t.proxyPing}</div>
           </div>
         </div>
 
@@ -599,10 +740,10 @@ export default function App() {
                 <div className="p-2 bg-blue-500/20 rounded-lg border border-blue-500/30">
                   <Zap className="w-4 h-4 text-blue-400" />
                 </div>
-                <h3 className="text-base font-semibold text-gray-200">Available Models</h3>
+                <h3 className="text-base font-semibold text-gray-200">{t.availableModelsTitle}</h3>
               </div>
               <div className="flex items-center space-x-3">
-                <span className="text-xs text-gray-500">{models.length} models</span>
+                <span className="text-xs text-gray-500">{models.length} {t.modelsCount}</span>
                 <button
                   onClick={handleRefresh}
                   className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5 flex items-center space-x-1"
@@ -668,7 +809,7 @@ export default function App() {
           <div className="w-16 h-16 bg-gradient-to-br from-blue-500/20 to-purple-600/20 rounded-full flex items-center justify-center mb-6 border border-white/10">
             <Shield className="w-8 h-8 text-blue-400" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Ready to Code?</h2>
+          <h2 className="text-2xl font-bold text-white mb-2">{t.ready}</h2>
           <p className="text-gray-400 max-w-lg mb-8">
             Connect to Antigravity IDE with your secure proxy token. A local proxy on port 8046 will route all IDE requests through the Manager.
           </p>
@@ -678,14 +819,14 @@ export default function App() {
             <div className="mb-6 flex items-center space-x-3">
               <div className="flex items-center space-x-2 text-emerald-400 bg-emerald-400/10 px-4 py-3 rounded-xl border border-emerald-400/20">
                 <Activity className="w-4 h-4 animate-pulse" />
-                <span className="text-sm font-medium">Local Proxy Active on :8046</span>
+                <span className="text-sm font-medium">{t.localProxy} :8046</span>
               </div>
               <button
                 onClick={handleStopProxy}
                 className="flex items-center space-x-1 px-3 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-400/20 transition-colors text-sm"
               >
                 <Square className="w-3 h-3" />
-                <span>Stop</span>
+                <span>{t.stop}</span>
               </button>
             </div>
           )}
@@ -693,7 +834,7 @@ export default function App() {
           {ideSuccess && (
             <div className="mb-6 flex items-center space-x-2 text-emerald-400 bg-emerald-400/10 px-4 py-3 rounded-xl border border-emerald-400/20">
               <CheckCircle className="w-5 h-5" />
-              <span className="text-sm font-medium">IDE launched successfully! Proxy running.</span>
+              <span className="text-sm font-medium">{t.ideLaunched}</span>
             </div>
           )}
 
@@ -737,7 +878,7 @@ export default function App() {
               <RefreshCw className="w-5 h-5 animate-spin" />
             ) : (
               <>
-                <span>{proxyRunning ? 'Reconnect IDE' : `Connect to ${ideType}`}</span>
+                <span>{proxyRunning ? t.reconnect : `${t.connectTo} ${ideType}`}</span>
                 <ExternalLink className="w-5 h-5" />
               </>
             )}
@@ -752,7 +893,7 @@ export default function App() {
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <h2 className="text-xl font-bold text-white flex items-center space-x-2">
                 <Settings className="w-5 h-5 text-gray-400" />
-                <span>IDE Settings</span>
+                <span>{t.ideSettings}</span>
               </h2>
               <button 
                 onClick={() => setShowSettings(false)}
@@ -777,7 +918,7 @@ export default function App() {
                   }}
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
                 />
-                <p className="text-xs text-gray-500">Leave blank to use default OS path.</p>
+                <p className="text-xs text-gray-500">{t.leaveBlank}</p>
               </div>
 
               <div className="space-y-2">
@@ -794,7 +935,7 @@ export default function App() {
                   }}
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
                 />
-                <p className="text-xs text-gray-500">Path to state.vscdb for portable installations.</p>
+                <p className="text-xs text-gray-500">{t.pathToVscdb}</p>
               </div>
             </div>
             
