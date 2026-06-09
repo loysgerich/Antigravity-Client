@@ -84,6 +84,7 @@ export default function App() {
   const [ideConnecting, setIdeConnecting] = useState(false);
   const [ideSuccess, setIdeSuccess] = useState(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  const [ping, setPing] = useState<number | null>(null);
   const [proxyRunning, setProxyRunning] = useState(false);
 
   // ─── Load saved state ────────────────────────────────────────────
@@ -113,13 +114,22 @@ export default function App() {
   // ─── Server Health Check ─────────────────────────────────────────
 
   const checkServerHealth = useCallback(async (url: string) => {
+    const startTime = performance.now();
     try {
       const res = await fetch(`${url}/health`, { 
         method: 'GET',
         signal: AbortSignal.timeout(5000),
       });
-      setServerOnline(res.ok);
+      const endTime = performance.now();
+      if (res.ok) {
+        setPing(Math.round(endTime - startTime));
+        setServerOnline(true);
+      } else {
+        setPing(null);
+        setServerOnline(false);
+      }
     } catch {
+      setPing(null);
       setServerOnline(false);
     }
   }, []);
@@ -280,6 +290,15 @@ export default function App() {
     return () => clearInterval(interval);
   }, [connected, token, serverUrl]);
 
+  // Poll server health / ping every 5 seconds
+  useEffect(() => {
+    checkServerHealth(serverUrl);
+    const interval = setInterval(() => {
+      checkServerHealth(serverUrl);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [serverUrl, checkServerHealth]);
+
   const handleSaveServerUrl = () => {
     localStorage.setItem(LS_SERVER_KEY, serverUrl);
     localStorage.setItem(LS_IDE_TYPE_KEY, ideType);
@@ -431,7 +450,7 @@ export default function App() {
               <h2 className="text-xl font-bold text-white">Antigravity Client</h2>
               <div className="flex items-center space-x-2 text-xs text-gray-400">
                 <CheckCircle className="w-3 h-3 text-emerald-400" />
-                <span>Connected to {new URL(serverUrl).host}</span>
+                <span>Connected. Ping: {ping !== null ? `${ping} ms` : '...'}</span>
               </div>
             </div>
           </div>
@@ -561,10 +580,14 @@ export default function App() {
               </div>
               <h3 className="text-sm font-medium text-gray-300">Server</h3>
             </div>
-            <div className="text-lg font-bold text-white mb-1 truncate" title={new URL(serverUrl).host}>
-              {new URL(serverUrl).host}
+            <div className={`text-2xl font-bold mb-1 ${
+              ping === null ? 'text-red-400' :
+              ping < 50 ? 'text-emerald-400' :
+              ping < 150 ? 'text-amber-400' : 'text-rose-400'
+            }`}>
+              {ping !== null ? `${ping} ms` : 'Offline'}
             </div>
-            <div className="text-xs text-gray-500">Proxy endpoint</div>
+            <div className="text-xs text-gray-500">Proxy endpoint ping</div>
           </div>
         </div>
 
