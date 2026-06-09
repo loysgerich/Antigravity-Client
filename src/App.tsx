@@ -63,7 +63,8 @@ const dict = {
     offline: "Offline",
     availableModelsTitle: "Available Models",
     modelsCount: "models",
-    serverConfig: "Server Configuration"
+    serverConfig: "Server Configuration",
+    daysLeft: "days left"
   },
   ru: {
     secureClient: "Безопасный прокси-клиент",
@@ -103,7 +104,8 @@ const dict = {
     offline: "Не в сети",
     availableModelsTitle: "Доступные модели",
     modelsCount: "моделей",
-    serverConfig: "Настройки сервера"
+    serverConfig: "Настройки сервера",
+    daysLeft: "дней осталось"
   }
 };
 
@@ -191,6 +193,7 @@ export default function App() {
   const [totalCredits, setTotalCredits] = useState<number | null>(null);
   const [creditOverages, setCreditOverages] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [ideConnecting, setIdeConnecting] = useState(false);
@@ -276,6 +279,7 @@ export default function App() {
           if (qRes.ok) {
             const qData = await qRes.json();
             setTotalCredits(qData.total_credits);
+            setExpiresAt(qData.expires_at || null);
             setCreditOverages(qData.enable_credit_overages);
             setModelPercentages(qData.models || {});
           }
@@ -391,6 +395,7 @@ export default function App() {
         if (qRes.ok) {
           const qData = await qRes.json();
           setTotalCredits(qData.total_credits);
+            setExpiresAt(qData.expires_at || null);
           setCreditOverages(qData.enable_credit_overages);
           setModelPercentages(qData.models || {});
         }
@@ -547,6 +552,13 @@ export default function App() {
     groupedModels[cat.label].push(m);
   });
 
+  
+  const getRemainingDays = (timestamp: number) => {
+    const diff = timestamp * 1000 - Date.now();
+    if (diff <= 0) return 0;
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] p-6 relative overflow-hidden text-white font-sans flex flex-col items-center">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80%] h-[500px] bg-blue-600/10 blur-[150px] pointer-events-none" />
@@ -673,7 +685,9 @@ export default function App() {
               <h3 className="text-sm font-medium text-gray-300">{t.status}</h3>
             </div>
             <div className="text-2xl font-bold text-emerald-400 mb-1">{t.active}</div>
-            <div className="text-xs text-gray-500">{t.tokenAuth}</div>
+            <div className="text-xs text-gray-500">
+              {expiresAt ? `${getRemainingDays(expiresAt)} ${t.daysLeft}` : t.tokenAuth}
+            </div>
           </div>
 
           {/* Models Count Card */}
