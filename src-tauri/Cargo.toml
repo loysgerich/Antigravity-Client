@@ -31,4 +31,6 @@ hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
-
+hickory-resolver = { version = "0.24", features = ["dns-over-https-rustls", "dns-over-rustls", "webpki-roots"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"

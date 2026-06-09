@@ -1,5 +1,7 @@
 pub mod db;
 pub mod local_proxy;
+pub mod dns;
+pub mod tunnel;
 pub mod utils {
     pub mod protobuf;
 }
@@ -64,6 +66,10 @@ async fn inject_token_and_start_ide(
     )?;
 
     eprintln!("[Client] Token injected successfully");
+
+    // 5. Start Reverse Tunnel for API requests
+    eprintln!("[Client] Starting reverse tunnel connection to Manager...");
+    crate::tunnel::start_tunnel_worker(proxy_url.clone(), token.clone()).await;
 
     // 6. Start Antigravity IDE
     start_antigravity_ide(&ide_type, custom_exe_path.as_deref())?;

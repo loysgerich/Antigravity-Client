@@ -601,7 +601,16 @@ export default function App() {
                 </div>
                 <h3 className="text-base font-semibold text-gray-200">Available Models</h3>
               </div>
-              <span className="text-xs text-gray-500">{models.length} models</span>
+              <div className="flex items-center space-x-3">
+                <span className="text-xs text-gray-500">{models.length} models</span>
+                <button
+                  onClick={handleRefresh}
+                  className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5 flex items-center space-x-1"
+                  title="Update Limits"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-gray-400 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3">
