@@ -617,3 +617,105 @@ fn inject_to_sqlite(token: &str, proxy_url: &str, email: &str, expiry: i64, ide_
 
     Ok("Successfully injected token and proxy URL into Antigravity IDE.".to_string())
 }
+
+pub fn clear_proxy_settings(ide_type: &str) -> Result<(), String> {
+    // 1. Clear SQLite setting
+    if let Ok(db_path) = get_db_path(ide_type, None) {
+        if db_path.exists() {
+            if let Ok(conn) = Connection::open(&db_path) {
+                let _ = conn.execute(
+                    "DELETE FROM ItemTable WHERE key = ?",
+                    ["antigravity.proxyBaseUrl"],
+                );
+                eprintln!("[Client] Cleared proxyBaseUrl from SQLite database for {}", ide_type);
+            }
+        }
+    }
+    
+    // 2. Clear settings.json setting
+    let mut settings_path = std::path::PathBuf::new();
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+            settings_path = home.join(format!("Library/Application Support/{}/User/settings.json", subfolder));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+            settings_path = std::path::PathBuf::from(appdata).join(format!("{}\\User\\settings.json", subfolder));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+            settings_path = home.join(format!(".config/{}/User/settings.json", subfolder));
+        }
+    }
+
+    if settings_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&settings_path) {
+            if let Ok(mut settings) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(obj) = settings.as_object_mut() {
+                    obj.remove("antigravity.proxyBaseUrl");
+                    if let Ok(new_content) = serde_json::to_string_pretty(&settings) {
+                        let _ = std::fs::write(&settings_path, new_content);
+                        eprintln!("[Client] Cleared proxyBaseUrl from settings.json for {}", ide_type);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub fn clear_keyring_credentials() -> Result<(), String> {
+    use std::process::Command;
+    
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("secret-tool")
+            .args(["clear", "service", "gemini", "username", "antigravity"])
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+            .output();
+            
+        if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
+            let _ = Command::new("cmdkey.exe")
+                .args(["/delete:gemini:antigravity"])
+                .output();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("security")
+            .args(["delete-generic-password", "-s", "gemini", "-a", "antigravity"])
+            .output();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn CredDeleteW(target_name: *const u16, type_: u32, flags: u32) -> i32;
+        }
+
+        let target = "gemini:antigravity";
+        let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        unsafe {
+            let _ = CredDeleteW(target_wide.as_ptr(), 1, 0);
+        }
+    }
+
+    Ok(())
+}

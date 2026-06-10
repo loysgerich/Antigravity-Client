@@ -103,7 +103,8 @@ async fn inject_token_and_start_ide(
 #[tauri::command]
 fn stop_proxy() -> Result<String, String> {
     stop_existing_proxy();
-    Ok("Proxy stopped".to_string())
+    restore_original_state_all();
+    Ok("Proxy stopped and original state restored".to_string())
 }
 
 #[tauri::command]
@@ -241,16 +242,27 @@ fn patch_ide_main_js(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bo
     let app_asar = resources_dir.join("app.asar");
     let main_js = resources_dir.join("app").join("out").join("main.js");
 
+    let mut patched = false;
+
     if app_asar.exists() {
         eprintln!("[Client] Found IDE app.asar at: {:?}", app_asar);
-        patch_asar_file(&app_asar)
+        if patch_asar_file(&app_asar)? {
+            patched = true;
+        }
+        match patch_unpacked_js_files(&resources_dir) {
+            Ok(p) => { if p { patched = true; } }
+            Err(e) => eprintln!("[Client] Warning: Failed to patch unpacked JS files: {}", e),
+        }
     } else if main_js.exists() {
         eprintln!("[Client] Found IDE main.js at: {:?}", main_js);
-        patch_js_file(&main_js)
+        if patch_js_file(&main_js)? {
+            patched = true;
+        }
     } else {
         eprintln!("[Client] Neither app.asar nor app/out/main.js found in resources");
-        Ok(false)
     }
+
+    Ok(patched)
 }
 
 /// Find the language server binary path and patch it.
@@ -286,8 +298,23 @@ fn patch_ide_language_server(ide_type: &str, custom_exe_path: Option<&str>) -> R
 
 /// Binary exact-length patching for language server binaries
 fn patch_binary_file(path: &std::path::Path) -> Result<bool, String> {
+    let mut backup_filename = path.file_name().unwrap_or_default().to_os_string();
+    backup_filename.push(".bak");
+    let backup_path = path.with_file_name(backup_filename);
+
+    if backup_path.exists() {
+        let _ = std::fs::remove_file(path);
+        std::fs::copy(&backup_path, path)
+            .map_err(|e| format!("Failed to restore clean binary for patching: {}", e))?;
+    }
+
     let mut content = std::fs::read(path)
         .map_err(|e| format!("Failed to read binary file {:?}: {}", path, e))?;
+
+    if !backup_path.exists() {
+        std::fs::copy(path, &backup_path)
+            .map_err(|e| format!("Failed to create backup copy of binary: {}", e))?;
+    }
 
     let replacements = [
         (
@@ -322,6 +349,14 @@ fn patch_binary_file(path: &std::path::Path) -> Result<bool, String> {
             b"https://oauth2.googleapis.com".to_vec(),
             b"http://127.0.0.1:8047////////".to_vec()
         ),
+        (
+            b"https://generativelanguage.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////".to_vec()
+        ),
+        (
+            b"aicode.googleapis.com".to_vec(),
+            b"aaaa.127.0.0.1.nip.io".to_vec()
+        ),
     ];
 
     let mut patched_any = false;
@@ -351,12 +386,22 @@ fn patch_binary_file(path: &std::path::Path) -> Result<bool, String> {
 
 /// Text patching for standard unpacked main.js
 fn patch_js_file(main_js_path: &std::path::Path) -> Result<bool, String> {
+    let mut backup_filename = main_js_path.file_name().unwrap_or_default().to_os_string();
+    backup_filename.push(".bak");
+    let backup_path = main_js_path.with_file_name(backup_filename);
+
+    if backup_path.exists() {
+        let _ = std::fs::remove_file(main_js_path);
+        std::fs::copy(&backup_path, main_js_path)
+            .map_err(|e| format!("Failed to restore clean main.js for patching: {}", e))?;
+    }
+
     let content = std::fs::read_to_string(main_js_path)
         .map_err(|e| format!("Failed to read main.js: {}", e))?;
 
-    if content.contains("http://127.0.0.1:8047/v1internal") {
-        eprintln!("[Client] main.js is already patched, skipping");
-        return Ok(false);
+    if !backup_path.exists() {
+        std::fs::copy(main_js_path, &backup_path)
+            .map_err(|e| format!("Failed to create backup copy of main.js: {}", e))?;
     }
 
     let patched = content
@@ -391,6 +436,14 @@ fn patch_js_file(main_js_path: &std::path::Path) -> Result<bool, String> {
         .replace(
             "https://oauth2.googleapis.com",
             "http://127.0.0.1:8047////////",
+        )
+        .replace(
+            "https://generativelanguage.googleapis.com",
+            "http://127.0.0.1:8047/v1internal",
+        )
+        .replace(
+            "aicode.googleapis.com",
+            "aaaa.127.0.0.1.nip.io",
         );
 
     std::fs::write(main_js_path, patched)
@@ -401,13 +454,22 @@ fn patch_js_file(main_js_path: &std::path::Path) -> Result<bool, String> {
 
 /// Binary exact-length patching for packed app.asar
 fn patch_asar_file(asar_path: &std::path::Path) -> Result<bool, String> {
+    let mut backup_filename = asar_path.file_name().unwrap_or_default().to_os_string();
+    backup_filename.push(".bak");
+    let backup_path = asar_path.with_file_name(backup_filename);
+
+    if backup_path.exists() {
+        let _ = std::fs::remove_file(asar_path);
+        std::fs::copy(&backup_path, asar_path)
+            .map_err(|e| format!("Failed to restore clean app.asar for patching: {}", e))?;
+    }
+
     let mut content = std::fs::read(asar_path)
         .map_err(|e| format!("Failed to read app.asar: {}", e))?;
 
-    let needle = b"http://127.0.0.1:8047/v1internal";
-    if content.windows(needle.len()).any(|window| window == needle) {
-        eprintln!("[Client] app.asar is already patched, skipping");
-        return Ok(false);
+    if !backup_path.exists() {
+        std::fs::copy(asar_path, &backup_path)
+            .map_err(|e| format!("Failed to create backup copy of app.asar: {}", e))?;
     }
 
     let replacements = [
@@ -442,6 +504,14 @@ fn patch_asar_file(asar_path: &std::path::Path) -> Result<bool, String> {
         (
             b"https://oauth2.googleapis.com".to_vec(),
             b"http://127.0.0.1:8047////////".to_vec()
+        ),
+        (
+            b"https://generativelanguage.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////".to_vec()
+        ),
+        (
+            b"aicode.googleapis.com".to_vec(),
+            b"aaaa.127.0.0.1.nip.io".to_vec()
         ),
     ];
 
@@ -574,18 +644,162 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
     Ok(())
 }
 
+fn restore_files(ide_type: &str) -> Result<(), String> {
+    let resources_dir = match get_ide_resources_path(ide_type, None) {
+        Some(p) => p,
+        None => {
+            eprintln!("[Client] Could not find IDE resources directory to restore for {}", ide_type);
+            return Ok(());
+        }
+    };
 
+    let app_asar = resources_dir.join("app.asar");
+    let main_js = resources_dir.join("app").join("out").join("main.js");
 
+    let mut paths_to_restore = Vec::new();
+    if app_asar.exists() {
+        paths_to_restore.push(app_asar);
+    }
+    if main_js.exists() {
+        paths_to_restore.push(main_js);
+    }
+
+    let unpacked_dir = resources_dir.join("app.asar.unpacked").join("node_modules").join("chrome-devtools-mcp").join("build").join("src");
+    if unpacked_dir.exists() {
+        let files = [
+            unpacked_dir.join("telemetry").join("watchdog").join("ClearcutSender.js"),
+            unpacked_dir.join("third_party").join("index.js"),
+            unpacked_dir.join("third_party").join("lighthouse-devtools-mcp-bundle.js"),
+            unpacked_dir.join("tools").join("performance.js"),
+        ];
+        for f in &files {
+            if f.exists() {
+                paths_to_restore.push(f.clone());
+            }
+        }
+    }
+
+    let bin_dir = resources_dir.join("bin");
+    if bin_dir.exists() {
+        for name in &["language_server.exe", "language_server"] {
+            let bin_path = bin_dir.join(name);
+            if bin_path.exists() {
+                paths_to_restore.push(bin_path);
+            }
+        }
+    }
+
+    for path in paths_to_restore {
+        let mut backup_filename = path.file_name().unwrap_or_default().to_os_string();
+        backup_filename.push(".bak");
+        let backup_path = path.with_file_name(backup_filename);
+
+        if backup_path.exists() {
+            eprintln!("[Client] Restoring original file from backup: {:?}", backup_path);
+            let _ = std::fs::remove_file(&path);
+            if let Err(e) = std::fs::rename(&backup_path, &path) {
+                eprintln!("[Client] Warning: Failed to rename backup file {:?} to {:?}: {}. Trying copy...", backup_path, path, e);
+                if let Err(copy_err) = std::fs::copy(&backup_path, &path) {
+                    eprintln!("[Client] Error: Failed to copy backup back to {:?}: {}", path, copy_err);
+                } else {
+                    let _ = std::fs::remove_file(&backup_path);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn patch_unpacked_js_files(resources_dir: &std::path::Path) -> Result<bool, String> {
+    let unpacked_dir = resources_dir.join("app.asar.unpacked").join("node_modules").join("chrome-devtools-mcp").join("build").join("src");
+    if !unpacked_dir.exists() {
+        return Ok(false);
+    }
+
+    let files_to_patch = [
+        unpacked_dir.join("telemetry").join("watchdog").join("ClearcutSender.js"),
+        unpacked_dir.join("third_party").join("index.js"),
+        unpacked_dir.join("third_party").join("lighthouse-devtools-mcp-bundle.js"),
+        unpacked_dir.join("tools").join("performance.js"),
+    ];
+
+    let mut patched_any = false;
+    for path in &files_to_patch {
+        if path.exists() {
+            let mut backup_filename = path.file_name().unwrap_or_default().to_os_string();
+            backup_filename.push(".bak");
+            let backup_path = path.with_file_name(backup_filename);
+
+            if backup_path.exists() {
+                let _ = std::fs::remove_file(path);
+                std::fs::copy(&backup_path, path)
+                    .map_err(|e| format!("Failed to restore clean unpacked file {:?}: {}", path, e))?;
+            }
+
+            let content = std::fs::read_to_string(path)
+                .map_err(|e| format!("Failed to read unpacked JS file {:?}: {}", path, e))?;
+
+            if !backup_path.exists() {
+                std::fs::copy(path, &backup_path)
+                    .map_err(|e| format!("Failed to create backup copy of unpacked JS: {}", e))?;
+            }
+
+            let patched = content
+                .replace("https://play.googleapis.com/log", "http://127.0.0.1:8047/telemetry-noop")
+                .replace("https://chromeuxreport.googleapis.com", "http://127.0.0.1:8047/telemetry-noop");
+
+            std::fs::write(path, patched)
+                .map_err(|e| format!("Failed to write patched unpacked JS file {:?}: {}", path, e))?;
+            patched_any = true;
+            eprintln!("[Client] Patched unpacked JS file: {:?}", path);
+        }
+    }
+
+    Ok(patched_any)
+}
+
+fn restore_original_state_all() {
+    eprintln!("[Client] Restoring original state (clearing settings, restoring files, clearing keyring)...");
+    
+    // Kill processes to ensure we can modify their files
+    kill_running_antigravity("Antigravity IDE");
+    kill_running_antigravity("Antigravity 2.0");
+
+    if let Err(e) = db::clear_keyring_credentials() {
+        eprintln!("[Client] Warning: Failed to clear keyring: {}", e);
+    }
+
+    for ide in &["Antigravity IDE", "Antigravity 2.0"] {
+        if let Err(e) = db::clear_proxy_settings(ide) {
+            eprintln!("[Client] Warning: Failed to clear proxy settings for {}: {}", ide, e);
+        }
+        if let Err(e) = restore_files(ide) {
+            eprintln!("[Client] Warning: Failed to restore files for {}: {}", ide, e);
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .setup(|_app| {
+            eprintln!("[Client] Application startup. Running cleanup to ensure clean state...");
+            restore_original_state_all();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             inject_token_and_start_ide,
             stop_proxy,
             get_proxy_status
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                eprintln!("[Client] Tauri application is exiting. Running final cleanup...");
+                restore_original_state_all();
+            }
+        });
 }
