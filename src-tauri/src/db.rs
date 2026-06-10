@@ -152,31 +152,48 @@ pub fn inject_real_token(access_token: &str, refresh_token: &str, expiry: i64, p
 
 /// Inject proxyBaseUrl into settings.json
 pub fn inject_to_settings(proxy_url: &str, ide_type: &str) -> Result<(), String> {
+    let mut settings_path = std::path::PathBuf::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+        let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        settings_path = home.join(format!("Library/Application Support/{}/User/settings.json", subfolder));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").map_err(|_| "Failed to get APPDATA environment variable".to_string())?;
+        let subfolder = if ide_type == "Antigravity 2.0" { "antigravity" } else { "Antigravity IDE" };
+        settings_path = std::path::PathBuf::from(appdata).join(format!("{}\\User\\settings.json", subfolder));
+    }
+
     #[cfg(target_os = "linux")]
     {
         let home = dirs::home_dir().ok_or("Failed to get home directory")?;
         let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
-        let settings_path = home.join(format!(".config/{}/User/settings.json", subfolder));
-        
-        let mut settings: serde_json::Value = if settings_path.exists() {
-            let content = std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
-            serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
-        } else {
-            if let Some(parent) = settings_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            serde_json::json!({})
-        };
-
-        if let Some(obj) = settings.as_object_mut() {
-            // Force the URL to include /v1 since the IDE proxy configuration usually requires it
-            let final_url = if proxy_url.ends_with("/v1") { proxy_url.to_string() } else { format!("{}/v1", proxy_url) };
-            obj.insert("antigravity.proxyBaseUrl".to_string(), serde_json::json!(final_url));
-        }
-
-        let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-        std::fs::write(settings_path, content).map_err(|e| e.to_string())?;
+        settings_path = home.join(format!(".config/{}/User/settings.json", subfolder));
     }
+
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        if let Some(parent) = settings_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        serde_json::json!({})
+    };
+
+    if let Some(obj) = settings.as_object_mut() {
+        // Force the URL to include /v1 since the IDE proxy configuration usually requires it
+        let final_url = if proxy_url.ends_with("/v1") { proxy_url.to_string() } else { format!("{}/v1", proxy_url) };
+        obj.insert("antigravity.proxyBaseUrl".to_string(), serde_json::json!(final_url));
+    }
+
+    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    std::fs::write(&settings_path, content).map_err(|e| format!("Failed to write to {:?}: {}", settings_path, e))?;
+
     Ok(())
 }
 
