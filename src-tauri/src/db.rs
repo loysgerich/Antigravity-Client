@@ -250,11 +250,11 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
         }
 
         if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
-            let _ = Command::new("cmd.exe")
-                .args(["/c", "cmdkey", "/delete:gemini:antigravity"])
+            let _ = Command::new("cmdkey.exe")
+                .args(["/delete:gemini/antigravity"])
                 .output();
-            let _ = Command::new("cmd.exe")
-                .args(["/c", "cmdkey", "/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
+            let _ = Command::new("cmdkey.exe")
+                .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
                 .output();
             eprintln!("[Client] Also injected credential into Windows Credential Manager via WSL");
         }
@@ -278,10 +278,10 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
     #[cfg(target_os = "windows")]
     {
         let _ = Command::new("cmdkey")
-            .args(["/delete:gemini"])
+            .args(["/delete:gemini/antigravity"])
             .output();
         let _ = Command::new("cmdkey")
-            .args([&format!("/generic:gemini"), "/user:antigravity", &format!("/pass:{}", payload_json)])
+            .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
             .output();
     }
 
@@ -354,11 +354,11 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
         }
 
         if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
-            let _ = Command::new("cmd.exe")
-                .args(["/c", "cmdkey", "/delete:gemini:antigravity"])
+            let _ = Command::new("cmdkey.exe")
+                .args(["/delete:gemini/antigravity"])
                 .output();
-            let _ = Command::new("cmd.exe")
-                .args(["/c", "cmdkey", "/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
+            let _ = Command::new("cmdkey.exe")
+                .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
                 .output();
             eprintln!("[Client] Also injected old-format credential into Windows Credential Manager via WSL");
         }
@@ -389,13 +389,13 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
         
         // Delete old
         let _ = Command::new("cmdkey")
-            .args(["/delete:gemini"])
+            .args(["/delete:gemini/antigravity"])
             .creation_flags(0x08000000)
             .output();
 
         // Write new
         let output = Command::new("cmdkey")
-            .args(["/generic:gemini", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
+            .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
             .creation_flags(0x08000000)
             .output()
             .map_err(|e| format!("Failed to execute cmdkey: {}", e))?;
