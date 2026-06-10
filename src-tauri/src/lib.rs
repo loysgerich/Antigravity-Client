@@ -81,6 +81,19 @@ async fn inject_token_and_start_ide(
         Err(e) => eprintln!("[Client] Warning: Failed to patch IDE main.js: {}", e),
     }
 
+    // 6b. Patch language server binary to route Google API URLs through our local proxy
+    eprintln!("[Client] Patching IDE language server binary to redirect API traffic through local proxy...");
+    match patch_ide_language_server(&ide_type, custom_exe_path.as_deref()) {
+        Ok(patched) => {
+            if patched {
+                eprintln!("[Client] IDE language_server patched successfully");
+            } else {
+                eprintln!("[Client] IDE language_server already patched or not found");
+            }
+        }
+        Err(e) => eprintln!("[Client] Warning: Failed to patch IDE language_server: {}", e),
+    }
+
     // 7. Start Antigravity IDE
     start_antigravity_ide(&ide_type, custom_exe_path.as_deref())?;
 
@@ -133,6 +146,9 @@ fn kill_running_antigravity(ide_type: &str) {
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", exe_name])
             .output();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "language_server.exe"])
+            .output();
     }
     #[cfg(target_os = "linux")]
     {
@@ -147,15 +163,15 @@ fn kill_running_antigravity(ide_type: &str) {
 }
 
 /// Find the IDE's main.js file path based on ide_type and optional custom exe path
-fn get_ide_main_js_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option<std::path::PathBuf> {
-    // If user provided a custom exe path, look for main.js relative to it
+/// Find the IDE's resources directory based on ide_type and optional custom exe path
+fn get_ide_resources_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option<std::path::PathBuf> {
     if let Some(exe) = custom_exe_path {
         if !exe.is_empty() {
             let exe_path = std::path::Path::new(exe);
             if let Some(parent) = exe_path.parent() {
-                let main_js = parent.join("resources").join("app").join("out").join("main.js");
-                if main_js.exists() {
-                    return Some(main_js);
+                let resources = parent.join("resources");
+                if resources.exists() {
+                    return Some(resources);
                 }
             }
         }
@@ -165,16 +181,21 @@ fn get_ide_main_js_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
-        let subfolder = if ide_type == "Antigravity 2.0" { "antigravity" } else { "Antigravity IDE" };
+        let subfolder = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
         let path = std::path::PathBuf::from(&appdata)
             .join("Programs")
             .join(subfolder)
-            .join("resources")
-            .join("app")
-            .join("out")
-            .join("main.js");
+            .join("resources");
         if path.exists() {
             return Some(path);
+        }
+        // Fallback for case-insensitive check
+        let path_lower = std::path::PathBuf::from(&appdata)
+            .join("Programs")
+            .join(if ide_type == "Antigravity 2.0" { "antigravity" } else { "Antigravity IDE" })
+            .join("resources");
+        if path_lower.exists() {
+            return Some(path_lower);
         }
     }
 
@@ -182,7 +203,7 @@ fn get_ide_main_js_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option
     {
         let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
         let path = std::path::PathBuf::from(format!(
-            "/Applications/{}.app/Contents/Resources/app/out/main.js", app_name
+            "/Applications/{}.app/Contents/Resources", app_name
         ));
         if path.exists() {
             return Some(path);
@@ -192,14 +213,12 @@ fn get_ide_main_js_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option
     #[cfg(target_os = "linux")]
     {
         let home = dirs::home_dir().unwrap_or_default();
-        // Try standard install location
         let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
-        let path = std::path::PathBuf::from(format!("/usr/share/{}/resources/app/out/main.js", bin_name));
+        let path = std::path::PathBuf::from(format!("/usr/share/{}/resources", bin_name));
         if path.exists() {
             return Some(path);
         }
-        // Try snap / flatpak / custom
-        let path2 = home.join(format!(".local/share/{}/resources/app/out/main.js", bin_name));
+        let path2 = home.join(format!(".local/share/{}/resources", bin_name));
         if path2.exists() {
             return Some(path2);
         }
@@ -208,36 +227,143 @@ fn get_ide_main_js_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option
     None
 }
 
-/// Patch the IDE's main.js to redirect hardcoded Google API URLs through local proxy.
+/// Patch the IDE's main.js or app.asar to redirect hardcoded Google API URLs through local proxy.
 /// Returns Ok(true) if patched, Ok(false) if already patched or file not found.
 fn patch_ide_main_js(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bool, String> {
-    let main_js_path = match get_ide_main_js_path(ide_type, custom_exe_path) {
+    let resources_dir = match get_ide_resources_path(ide_type, custom_exe_path) {
         Some(p) => p,
         None => {
-            eprintln!("[Client] Could not find IDE main.js to patch");
+            eprintln!("[Client] Could not find IDE resources directory to patch");
             return Ok(false);
         }
     };
 
-    eprintln!("[Client] Found IDE main.js at: {:?}", main_js_path);
+    let app_asar = resources_dir.join("app.asar");
+    let main_js = resources_dir.join("app").join("out").join("main.js");
 
-    let content = std::fs::read_to_string(&main_js_path)
+    if app_asar.exists() {
+        eprintln!("[Client] Found IDE app.asar at: {:?}", app_asar);
+        patch_asar_file(&app_asar)
+    } else if main_js.exists() {
+        eprintln!("[Client] Found IDE main.js at: {:?}", main_js);
+        patch_js_file(&main_js)
+    } else {
+        eprintln!("[Client] Neither app.asar nor app/out/main.js found in resources");
+        Ok(false)
+    }
+}
+
+/// Find the language server binary path and patch it.
+fn patch_ide_language_server(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bool, String> {
+    let resources_dir = match get_ide_resources_path(ide_type, custom_exe_path) {
+        Some(p) => p,
+        None => {
+            eprintln!("[Client] Could not find IDE resources directory to patch language server");
+            return Ok(false);
+        }
+    };
+
+    let bin_dir = resources_dir.join("bin");
+    if !bin_dir.exists() {
+        return Ok(false);
+    }
+
+    let binary_names = ["language_server.exe", "language_server"];
+    let mut patched = false;
+
+    for name in &binary_names {
+        let bin_path = bin_dir.join(name);
+        if bin_path.exists() {
+            eprintln!("[Client] Found language server binary at: {:?}", bin_path);
+            if patch_binary_file(&bin_path)? {
+                patched = true;
+            }
+        }
+    }
+
+    Ok(patched)
+}
+
+/// Binary exact-length patching for language server binaries
+fn patch_binary_file(path: &std::path::Path) -> Result<bool, String> {
+    let mut content = std::fs::read(path)
+        .map_err(|e| format!("Failed to read binary file {:?}: {}", path, e))?;
+
+    let replacements = [
+        (
+            b"https://cloudcode-pa.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal///".to_vec()
+        ),
+        (
+            b"https://autopush-cloudcode-pa.sandbox.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal////////////////////".to_vec()
+        ),
+        (
+            b"https://preprod-daily-cloudcode-pa.sandbox.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////////////////////".to_vec()
+        ),
+        (
+            b"https://daily-cloudcode-pa.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////".to_vec()
+        ),
+        (
+            b"https://www.googleapis.com/oauth2/v2/userinfo".to_vec(),
+            b"http://127.0.0.1:8047/userinfo///////////////".to_vec()
+        ),
+        (
+            b"https://play.googleapis.com/log".to_vec(),
+            b"http://127.0.0.1:8047/log//////".to_vec()
+        ),
+        (
+            b"https://www.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/////".to_vec()
+        ),
+        (
+            b"https://oauth2.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047////////".to_vec()
+        ),
+    ];
+
+    let mut patched_any = false;
+    for (from, to) in &replacements {
+        assert_eq!(from.len(), to.len(), "Replacement lengths must match exactly!");
+        
+        let mut i = 0;
+        while i + from.len() <= content.len() {
+            if content[i..i + from.len()] == **from {
+                content[i..i + from.len()].copy_from_slice(to);
+                patched_any = true;
+                i += from.len();
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    if patched_any {
+        std::fs::write(path, content)
+            .map_err(|e| format!("Failed to write patched binary {:?}: {}", path, e))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// Text patching for standard unpacked main.js
+fn patch_js_file(main_js_path: &std::path::Path) -> Result<bool, String> {
+    let content = std::fs::read_to_string(main_js_path)
         .map_err(|e| format!("Failed to read main.js: {}", e))?;
 
-    // Check if already patched (proxy URL already present)
     if content.contains("http://127.0.0.1:8047/v1internal") {
         eprintln!("[Client] main.js is already patched, skipping");
         return Ok(false);
     }
 
-    // Replace hardcoded Google API endpoints with local proxy
     let patched = content
-        // Main API endpoint (production)
         .replace(
             "https://cloudcode-pa.googleapis.com",
             "http://127.0.0.1:8047/v1internal",
         )
-        // Staging/daily endpoints
         .replace(
             "https://autopush-cloudcode-pa.sandbox.googleapis.com",
             "http://127.0.0.1:8047/v1internal",
@@ -250,22 +376,98 @@ fn patch_ide_main_js(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bo
             "https://daily-cloudcode-pa.googleapis.com",
             "http://127.0.0.1:8047/v1internal",
         )
-        // OAuth userinfo endpoint
         .replace(
             "https://www.googleapis.com/oauth2/v2/userinfo",
             "http://127.0.0.1:8047/userinfo",
         )
-        // Telemetry endpoint (blocks 401 crashes)
         .replace(
             "https://play.googleapis.com/log",
             "http://127.0.0.1:8047/telemetry-noop",
+        )
+        .replace(
+            "https://www.googleapis.com",
+            "http://127.0.0.1:8047/////",
+        )
+        .replace(
+            "https://oauth2.googleapis.com",
+            "http://127.0.0.1:8047////////",
         );
 
-    // Write back
-    std::fs::write(&main_js_path, patched)
+    std::fs::write(main_js_path, patched)
         .map_err(|e| format!("Failed to write patched main.js: {}", e))?;
 
     Ok(true)
+}
+
+/// Binary exact-length patching for packed app.asar
+fn patch_asar_file(asar_path: &std::path::Path) -> Result<bool, String> {
+    let mut content = std::fs::read(asar_path)
+        .map_err(|e| format!("Failed to read app.asar: {}", e))?;
+
+    let needle = b"http://127.0.0.1:8047/v1internal";
+    if content.windows(needle.len()).any(|window| window == needle) {
+        eprintln!("[Client] app.asar is already patched, skipping");
+        return Ok(false);
+    }
+
+    let replacements = [
+        (
+            b"https://cloudcode-pa.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal///".to_vec()
+        ),
+        (
+            b"https://autopush-cloudcode-pa.sandbox.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal////////////////////".to_vec()
+        ),
+        (
+            b"https://preprod-daily-cloudcode-pa.sandbox.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////////////////////".to_vec()
+        ),
+        (
+            b"https://daily-cloudcode-pa.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////".to_vec()
+        ),
+        (
+            b"https://www.googleapis.com/oauth2/v2/userinfo".to_vec(),
+            b"http://127.0.0.1:8047/userinfo///////////////".to_vec()
+        ),
+        (
+            b"https://play.googleapis.com/log".to_vec(),
+            b"http://127.0.0.1:8047/log//////".to_vec()
+        ),
+        (
+            b"https://www.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/////".to_vec()
+        ),
+        (
+            b"https://oauth2.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047////////".to_vec()
+        ),
+    ];
+
+    let mut patched_any = false;
+    for (from, to) in &replacements {
+        assert_eq!(from.len(), to.len(), "Replacement lengths must match exactly!");
+        
+        let mut i = 0;
+        while i + from.len() <= content.len() {
+            if content[i..i + from.len()] == **from {
+                content[i..i + from.len()].copy_from_slice(to);
+                patched_any = true;
+                i += from.len();
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    if patched_any {
+        std::fs::write(asar_path, content)
+            .map_err(|e| format!("Failed to write patched app.asar: {}", e))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 /// Start Antigravity IDE
@@ -337,7 +539,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 #[cfg(target_os = "windows")]
                 {
                     if let Ok(output) = std::process::Command::new("tasklist").args(&["/FI", &format!("IMAGENAME eq {}", exe_name), "/NH"]).output() {
-                        String::from_utf8_lossy(&output.stdout).contains(exe_name)
+                        String::from_utf8_lossy(&output.stdout).to_lowercase().contains(&exe_name.to_lowercase())
                     } else {
                         true // fallback if tasklist fails
                     }

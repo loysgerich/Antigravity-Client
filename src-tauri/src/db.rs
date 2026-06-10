@@ -256,10 +256,10 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
 
         if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
             let _ = Command::new("cmdkey.exe")
-                .args(["/delete:gemini/antigravity"])
+                .args(["/delete:gemini:antigravity"])
                 .output();
             let _ = Command::new("cmdkey.exe")
-                .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
+                .args(["/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
                 .output();
             eprintln!("[Client] Also injected credential into Windows Credential Manager via WSL");
         }
@@ -313,12 +313,12 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
             fn CredDeleteW(target_name: *const u16, type_: u32, flags: u32) -> i32;
         }
 
-        let target = "gemini/antigravity";
+        let target = "gemini:antigravity";
         let user = "antigravity";
-        // node-keytar expects the blob to be UTF-16LE without null terminator
-        let secret_wide: Vec<u16> = std::ffi::OsStr::new(&payload_json).encode_wide().collect();
-        let secret_size = (secret_wide.len() * 2) as u32;
-        let secret_ptr = secret_wide.as_ptr() as *const u8;
+        // Language server expects raw UTF-8 JSON string on Windows
+        let secret_bytes = payload_json.as_bytes();
+        let secret_size = secret_bytes.len() as u32;
+        let secret_ptr = secret_bytes.as_ptr();
 
         let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
             .encode_wide()
@@ -425,10 +425,10 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
 
         if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
             let _ = Command::new("cmdkey.exe")
-                .args(["/delete:gemini/antigravity"])
+                .args(["/delete:gemini:antigravity"])
                 .output();
             let _ = Command::new("cmdkey.exe")
-                .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
+                .args(["/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
                 .output();
             eprintln!("[Client] Also injected old-format credential into Windows Credential Manager via WSL");
         }
@@ -486,12 +486,12 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
             fn CredDeleteW(target_name: *const u16, type_: u32, flags: u32) -> i32;
         }
 
-        let target = "gemini/antigravity";
+        let target = "gemini:antigravity";
         let user = "antigravity";
-        // node-keytar expects the blob to be UTF-16LE without null terminator
-        let secret_wide: Vec<u16> = std::ffi::OsStr::new(&full_keyring_value).encode_wide().collect();
-        let secret_size = (secret_wide.len() * 2) as u32;
-        let secret_ptr = secret_wide.as_ptr() as *const u8;
+        // Language server expects raw UTF-8 JSON string on Windows
+        let secret_bytes = full_keyring_value.as_bytes();
+        let secret_size = secret_bytes.len() as u32;
+        let secret_ptr = secret_bytes.as_ptr();
 
         let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
             .encode_wide()
