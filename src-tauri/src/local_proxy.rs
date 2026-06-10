@@ -21,9 +21,32 @@ pub struct ProxyConfig {
 /// When the sender is dropped or sends `true`, the server stops.
 pub async fn start_proxy(config: ProxyConfig) -> Result<watch::Sender<bool>, String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], config.listen_port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("Failed to bind to port {}: {}", config.listen_port, e))?;
+    let mut listener = None;
+    let mut last_err = None;
+    for attempt in 1..=10 {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => {
+                listener = Some(l);
+                break;
+            }
+            Err(e) => {
+                eprintln!("[LocalProxy] Bind attempt {} to port {} failed: {}. Retrying in 200ms...", attempt, config.listen_port, e);
+                last_err = Some(e);
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+    }
+
+    let listener = match listener {
+        Some(l) => l,
+        None => {
+            return Err(format!(
+                "Failed to bind to port {} after 10 attempts: {}",
+                config.listen_port,
+                last_err.map(|e| e.to_string()).unwrap_or_default()
+            ));
+        }
+    };
     eprintln!("[LocalProxy] Bind successful");
 
     eprintln!("[LocalProxy] Listening on http://{}", addr);
@@ -115,11 +138,14 @@ async fn proxy_request(
     while path.contains("//") {
         path = path.replace("//", "/");
     }
-    if path.starts_with("/v1/") {
-        path = path[3..].to_string(); // Removes "/v1", leaving "/..."
-    }
-    if path.starts_with("/v1internal:") {
+
+    // Fix double v1internal caused by IDE patching
+    if path.starts_with("/v1internal/v1internal:") {
+        path = path.replace("/v1internal/v1internal:", "/v1internal/");
+    } else if path.starts_with("/v1internal:") {
         path = path.replace("v1internal:", "v1internal/");
+    } else if path.starts_with("/v1internal/v1internal/") {
+        path = path.replace("/v1internal/v1internal/", "/v1internal/");
     }
 
     // Add CORS headers to all responses
@@ -216,12 +242,20 @@ async fn proxy_request(
         return Ok(resp);
     }
 
+    // Intercept telemetry/logging to prevent 401 crashes
+    if path.contains("telemetry-noop") || path.contains("/log") && !path.contains("login") {
+        eprintln!("[LocalProxy] Intercepting telemetry: {}", path);
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", &cors_origin)
+            .body(http_body_util::Full::new(bytes::Bytes::from("{}")))
+            .unwrap();
+        return Ok(resp);
+    }
+
     // Build target URL
-    let mut upstream_path = if path.starts_with("/v1/") {
-        path.trim_start_matches("/v1")
-    } else {
-        &path
-    };
+    let mut upstream_path = path.as_str();
 
     // Strip duplicate leading slashes caused by binary padding
     while upstream_path.starts_with("//") {

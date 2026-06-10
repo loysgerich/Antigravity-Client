@@ -189,6 +189,11 @@ pub fn inject_to_settings(proxy_url: &str, ide_type: &str) -> Result<(), String>
         // Force the URL to include /v1 since the IDE proxy configuration usually requires it
         let final_url = if proxy_url.ends_with("/v1") { proxy_url.to_string() } else { format!("{}/v1", proxy_url) };
         obj.insert("antigravity.proxyBaseUrl".to_string(), serde_json::json!(final_url));
+        
+        // Disable telemetry to prevent 401 crashes with play.googleapis.com
+        obj.insert("telemetry.telemetryLevel".to_string(), serde_json::json!("off"));
+        obj.insert("telemetry.enableCrashReporter".to_string(), serde_json::json!(false));
+        obj.insert("telemetry.enableTelemetry".to_string(), serde_json::json!(false));
     }
 
     let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
@@ -277,12 +282,77 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
 
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("cmdkey")
-            .args(["/delete:gemini/antigravity"])
-            .output();
-        let _ = Command::new("cmdkey")
-            .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
-            .output();
+        use std::ptr;
+        use std::os::windows::ffi::OsStrExt;
+
+        #[repr(C)]
+        struct FILETIME {
+            dw_low_date_time: u32,
+            dw_high_date_time: u32,
+        }
+
+        #[repr(C)]
+        struct CREDENTIALW {
+            flags: u32,
+            cred_type: u32,
+            target_name: *const u16,
+            comment: *const u16,
+            last_written: FILETIME,
+            credential_blob_size: u32,
+            credential_blob: *const u8,
+            persist: u32,
+            attribute_count: u32,
+            attributes: *const std::ffi::c_void,
+            target_alias: *const u16,
+            user_name: *const u16,
+        }
+
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn CredWriteW(credential: *const CREDENTIALW, flags: u32) -> i32;
+            fn CredDeleteW(target_name: *const u16, type_: u32, flags: u32) -> i32;
+        }
+
+        let target = "gemini/antigravity";
+        let user = "antigravity";
+        // node-keytar expects the blob to be UTF-16LE without null terminator
+        let secret_wide: Vec<u16> = std::ffi::OsStr::new(&payload_json).encode_wide().collect();
+        let secret_size = (secret_wide.len() * 2) as u32;
+        let secret_ptr = secret_wide.as_ptr() as *const u8;
+
+        let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let user_wide: Vec<u16> = std::ffi::OsStr::new(user)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let cred = CREDENTIALW {
+            flags: 0,
+            cred_type: 1, // CRED_TYPE_GENERIC
+            target_name: target_wide.as_ptr(),
+            comment: ptr::null(),
+            last_written: FILETIME { dw_low_date_time: 0, dw_high_date_time: 0 },
+            credential_blob_size: secret_size,
+            credential_blob: secret_ptr,
+            persist: 2, // CRED_PERSIST_LOCAL_MACHINE
+            attribute_count: 0,
+            attributes: ptr::null(),
+            target_alias: ptr::null(),
+            user_name: user_wide.as_ptr(),
+        };
+
+        unsafe {
+            let _ = CredDeleteW(target_wide.as_ptr(), 1, 0);
+            let res = CredWriteW(&cred, 0);
+            if res == 0 {
+                let err = std::io::Error::last_os_error();
+                return Err(format!("Windows CredWriteW failed: {}", err));
+            }
+        }
     }
 
     Ok(())
@@ -385,24 +455,76 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        
-        // Delete old
-        let _ = Command::new("cmdkey")
-            .args(["/delete:gemini/antigravity"])
-            .creation_flags(0x08000000)
-            .output();
+        use std::ptr;
+        use std::os::windows::ffi::OsStrExt;
 
-        // Write new
-        let output = Command::new("cmdkey")
-            .args(["/generic:gemini/antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
-            .creation_flags(0x08000000)
-            .output()
-            .map_err(|e| format!("Failed to execute cmdkey: {}", e))?;
+        #[repr(C)]
+        struct FILETIME {
+            dw_low_date_time: u32,
+            dw_high_date_time: u32,
+        }
 
-        if !output.status.success() {
-            let err_msg = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Windows cmdkey failed: {}", err_msg.trim()));
+        #[repr(C)]
+        struct CREDENTIALW {
+            flags: u32,
+            cred_type: u32,
+            target_name: *const u16,
+            comment: *const u16,
+            last_written: FILETIME,
+            credential_blob_size: u32,
+            credential_blob: *const u8,
+            persist: u32,
+            attribute_count: u32,
+            attributes: *const std::ffi::c_void,
+            target_alias: *const u16,
+            user_name: *const u16,
+        }
+
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn CredWriteW(credential: *const CREDENTIALW, flags: u32) -> i32;
+            fn CredDeleteW(target_name: *const u16, type_: u32, flags: u32) -> i32;
+        }
+
+        let target = "gemini/antigravity";
+        let user = "antigravity";
+        // node-keytar expects the blob to be UTF-16LE without null terminator
+        let secret_wide: Vec<u16> = std::ffi::OsStr::new(&full_keyring_value).encode_wide().collect();
+        let secret_size = (secret_wide.len() * 2) as u32;
+        let secret_ptr = secret_wide.as_ptr() as *const u8;
+
+        let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let user_wide: Vec<u16> = std::ffi::OsStr::new(user)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let cred = CREDENTIALW {
+            flags: 0,
+            cred_type: 1, // CRED_TYPE_GENERIC
+            target_name: target_wide.as_ptr(),
+            comment: ptr::null(),
+            last_written: FILETIME { dw_low_date_time: 0, dw_high_date_time: 0 },
+            credential_blob_size: secret_size,
+            credential_blob: secret_ptr,
+            persist: 2, // CRED_PERSIST_LOCAL_MACHINE
+            attribute_count: 0,
+            attributes: ptr::null(),
+            target_alias: ptr::null(),
+            user_name: user_wide.as_ptr(),
+        };
+
+        unsafe {
+            let _ = CredDeleteW(target_wide.as_ptr(), 1, 0);
+            let res = CredWriteW(&cred, 0);
+            if res == 0 {
+                let err = std::io::Error::last_os_error();
+                return Err(format!("Windows CredWriteW failed: {}", err));
+            }
         }
     }
 

@@ -12,6 +12,7 @@ use tokio::sync::watch;
 // Global proxy shutdown handle
 static PROXY_SHUTDOWN: Mutex<Option<watch::Sender<bool>>> = Mutex::new(None);
 static PROXY_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PROXY_SESSION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[tauri::command]
 async fn inject_token_and_start_ide(
@@ -24,22 +25,19 @@ async fn inject_token_and_start_ide(
     // 1. Kill any running instance of the selected IDE first
     kill_running_antigravity(&ide_type);
 
-    // 2. Stop any existing proxy
-    stop_existing_proxy();
-
-    // 3. Small delay to ensure processes are fully terminated
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    // 4. Start the local proxy on port 8047
-    // This proxy intercepts all IDE requests and forwards them to the Manager
-    eprintln!("[Client] Starting local proxy on :8047 -> {}", proxy_url);
-
-    // Strip /v1 suffix if present since the proxy needs the base URL
+    // 2. Strip /v1 suffix if present since the proxy needs the base URL
     let base_url = proxy_url.trim_end_matches("/v1").to_string();
+
+    // 3. Stop existing proxy first to avoid port conflict and configuration reuse
+    stop_existing_proxy();
+    let _session_id = PROXY_SESSION_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+
+    // 4. Start local proxy on port 8047
+    eprintln!("[Client] Starting local proxy on :8047 -> {}", base_url);
 
     let config = local_proxy::ProxyConfig {
         listen_port: 8047,
-        target_url: base_url,
+        target_url: base_url.clone(),
         bearer_token: token.clone(),
     };
 
@@ -52,7 +50,6 @@ async fn inject_token_and_start_ide(
         *guard = Some(shutdown_tx);
     }
     PROXY_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
-
     eprintln!("[Client] Local proxy started successfully");
 
     eprintln!("[Client] Injecting proxy token into IDE keyring...");
@@ -69,9 +66,22 @@ async fn inject_token_and_start_ide(
 
     // 5. Start Reverse Tunnel for API requests
     eprintln!("[Client] Starting reverse tunnel connection to Manager...");
-    crate::tunnel::start_tunnel_worker(proxy_url.clone(), token.clone()).await;
+    crate::tunnel::start_tunnel_worker(base_url.clone(), token.clone()).await;
 
-    // 6. Start Antigravity IDE
+    // 6. Patch IDE main.js to route hardcoded Google API URLs through our local proxy
+    eprintln!("[Client] Patching IDE main.js to redirect API traffic through local proxy...");
+    match patch_ide_main_js(&ide_type, custom_exe_path.as_deref()) {
+        Ok(patched) => {
+            if patched {
+                eprintln!("[Client] IDE main.js patched successfully");
+            } else {
+                eprintln!("[Client] IDE main.js already patched or not found");
+            }
+        }
+        Err(e) => eprintln!("[Client] Warning: Failed to patch IDE main.js: {}", e),
+    }
+
+    // 7. Start Antigravity IDE
     start_antigravity_ide(&ide_type, custom_exe_path.as_deref())?;
 
     Ok("Proxy started and IDE launched successfully".to_string())
@@ -96,6 +106,16 @@ fn stop_existing_proxy() {
         }
     }
     PROXY_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn stop_proxy_for_session(session_id: u64) {
+    let current_session = PROXY_SESSION_ID.load(std::sync::atomic::Ordering::SeqCst);
+    if current_session == session_id {
+        eprintln!("[Client] Stopping proxy for session {}", session_id);
+        stop_existing_proxy();
+    } else {
+        eprintln!("[Client] Ignoring stop_proxy for old session {} (current is {})", session_id, current_session);
+    }
 }
 
 /// Kill running Antigravity processes for the selected IDE type
@@ -124,6 +144,128 @@ fn kill_running_antigravity(ide_type: &str) {
             .args(["-f", "language_server"])
             .output();
     }
+}
+
+/// Find the IDE's main.js file path based on ide_type and optional custom exe path
+fn get_ide_main_js_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option<std::path::PathBuf> {
+    // If user provided a custom exe path, look for main.js relative to it
+    if let Some(exe) = custom_exe_path {
+        if !exe.is_empty() {
+            let exe_path = std::path::Path::new(exe);
+            if let Some(parent) = exe_path.parent() {
+                let main_js = parent.join("resources").join("app").join("out").join("main.js");
+                if main_js.exists() {
+                    return Some(main_js);
+                }
+            }
+        }
+    }
+
+    // Default paths by OS
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        let subfolder = if ide_type == "Antigravity 2.0" { "antigravity" } else { "Antigravity IDE" };
+        let path = std::path::PathBuf::from(&appdata)
+            .join("Programs")
+            .join(subfolder)
+            .join("resources")
+            .join("app")
+            .join("out")
+            .join("main.js");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        let path = std::path::PathBuf::from(format!(
+            "/Applications/{}.app/Contents/Resources/app/out/main.js", app_name
+        ));
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home = dirs::home_dir().unwrap_or_default();
+        // Try standard install location
+        let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
+        let path = std::path::PathBuf::from(format!("/usr/share/{}/resources/app/out/main.js", bin_name));
+        if path.exists() {
+            return Some(path);
+        }
+        // Try snap / flatpak / custom
+        let path2 = home.join(format!(".local/share/{}/resources/app/out/main.js", bin_name));
+        if path2.exists() {
+            return Some(path2);
+        }
+    }
+
+    None
+}
+
+/// Patch the IDE's main.js to redirect hardcoded Google API URLs through local proxy.
+/// Returns Ok(true) if patched, Ok(false) if already patched or file not found.
+fn patch_ide_main_js(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bool, String> {
+    let main_js_path = match get_ide_main_js_path(ide_type, custom_exe_path) {
+        Some(p) => p,
+        None => {
+            eprintln!("[Client] Could not find IDE main.js to patch");
+            return Ok(false);
+        }
+    };
+
+    eprintln!("[Client] Found IDE main.js at: {:?}", main_js_path);
+
+    let content = std::fs::read_to_string(&main_js_path)
+        .map_err(|e| format!("Failed to read main.js: {}", e))?;
+
+    // Check if already patched (proxy URL already present)
+    if content.contains("http://127.0.0.1:8047/v1internal") {
+        eprintln!("[Client] main.js is already patched, skipping");
+        return Ok(false);
+    }
+
+    // Replace hardcoded Google API endpoints with local proxy
+    let patched = content
+        // Main API endpoint (production)
+        .replace(
+            "https://cloudcode-pa.googleapis.com",
+            "http://127.0.0.1:8047/v1internal",
+        )
+        // Staging/daily endpoints
+        .replace(
+            "https://autopush-cloudcode-pa.sandbox.googleapis.com",
+            "http://127.0.0.1:8047/v1internal",
+        )
+        .replace(
+            "https://preprod-daily-cloudcode-pa.sandbox.googleapis.com",
+            "http://127.0.0.1:8047/v1internal",
+        )
+        .replace(
+            "https://daily-cloudcode-pa.googleapis.com",
+            "http://127.0.0.1:8047/v1internal",
+        )
+        // OAuth userinfo endpoint
+        .replace(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            "http://127.0.0.1:8047/userinfo",
+        )
+        // Telemetry endpoint (blocks 401 crashes)
+        .replace(
+            "https://play.googleapis.com/log",
+            "http://127.0.0.1:8047/telemetry-noop",
+        );
+
+    // Write back
+    std::fs::write(&main_js_path, patched)
+        .map_err(|e| format!("Failed to write patched main.js: {}", e))?;
+
+    Ok(true)
 }
 
 /// Start Antigravity IDE
@@ -176,6 +318,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
     }
 
     let ide_type_clone = ide_type.to_string();
+    let session_id = PROXY_SESSION_ID.load(std::sync::atomic::Ordering::SeqCst);
     std::thread::spawn(move || {
         // Wait for the spawned process to exit to reap zombies
         if let Some(mut child) = child_opt {
@@ -212,11 +355,12 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
 
             // Also check if proxy was stopped manually by user (PROXY_RUNNING is false)
             let proxy_running = crate::PROXY_RUNNING.load(std::sync::atomic::Ordering::SeqCst);
+            let current_session = crate::PROXY_SESSION_ID.load(std::sync::atomic::Ordering::SeqCst);
 
-            if !is_running || !proxy_running {
-                if proxy_running {
+            if !is_running || !proxy_running || current_session != session_id {
+                if proxy_running && current_session == session_id {
                     eprintln!("[Client] IDE process exited. Stopping proxy.");
-                    crate::stop_existing_proxy();
+                    crate::stop_proxy_for_session(session_id);
                 }
                 break;
             }

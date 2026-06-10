@@ -19,7 +19,12 @@ async fn tunnel_loop(server_url: String, token: String) {
     let ws_url = format!("{}/v1/tunnel?token={}", ws_url, token);
 
     loop {
-        match connect_async(&ws_url).await {
+        let mut request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(ws_url.clone()).unwrap();
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {}", token).parse().unwrap(),
+        );
+        match connect_async(request).await {
             Ok((ws_stream, _)) => {
                 eprintln!("[Tunnel] Connected to Manager WebSocket");
                 let (mut write, mut read) = ws_stream.split();
