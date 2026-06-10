@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { 
   Shield, Zap, ExternalLink, RefreshCw, LogIn, Key, 
@@ -200,6 +200,7 @@ export default function App() {
   const [ideSuccess, setIdeSuccess] = useState(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   const [ping, setPing] = useState<number | null>(null);
+  const pingHistoryRef = useRef<number[]>([]);
   const [proxyRunning, setProxyRunning] = useState(false);
 
   // ─── Load saved state ────────────────────────────────────────────
@@ -237,13 +238,20 @@ export default function App() {
       });
       const endTime = performance.now();
       if (res.ok) {
-        setPing(Math.round(endTime - startTime));
+        const rawPing = Math.round(endTime - startTime);
+        pingHistoryRef.current.push(rawPing);
+        if (pingHistoryRef.current.length > 5) {
+            pingHistoryRef.current.shift();
+        }
+        setPing(Math.min(...pingHistoryRef.current));
         setServerOnline(true);
       } else {
+        pingHistoryRef.current = [];
         setPing(null);
         setServerOnline(false);
       }
     } catch {
+      pingHistoryRef.current = [];
       setPing(null);
       setServerOnline(false);
     }
