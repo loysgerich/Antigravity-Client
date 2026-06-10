@@ -64,7 +64,9 @@ const dict = {
     availableModelsTitle: "Available Models",
     modelsCount: "models",
     serverConfig: "Server Configuration",
-    daysLeft: "days left"
+    daysLeft: "days left",
+    serverStatus: "Server Status",
+    support: "Support"
   },
   ru: {
     secureClient: "Безопасный прокси-клиент",
@@ -105,7 +107,9 @@ const dict = {
     availableModelsTitle: "Доступные модели",
     modelsCount: "моделей",
     serverConfig: "Настройки сервера",
-    daysLeft: "дней осталось"
+    daysLeft: "дней осталось",
+    serverStatus: "Статус сервера",
+    support: "Поддержка"
   }
 };
 
@@ -459,6 +463,35 @@ export default function App() {
   if (!connected) {
     return (
       <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center relative overflow-hidden text-white font-sans">
+                {/* Language Dropdown */}
+        <div className="absolute top-4 right-4 z-50 lang-dropdown">
+          <button
+            onClick={() => setShowLangDropdown(!showLangDropdown)}
+            className="flex items-center space-x-1 px-3 h-10 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5 text-sm font-medium text-gray-300"
+            title="Change Language"
+          >
+            <Globe className="w-4 h-4" />
+            <span>{lang.toUpperCase()}</span>
+            <ChevronDown className={`w-4 h-4 transition-transform ${showLangDropdown ? 'rotate-180' : ''}`} />
+          </button>
+          
+          {showLangDropdown && (
+            <div className="absolute right-0 mt-2 w-32 bg-[#1a1c23] border border-white/10 rounded-xl shadow-2xl py-1 z-50 overflow-hidden">
+              <button
+                onClick={() => changeLang('en')}
+                className={`w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors ${lang === 'en' ? 'text-blue-400 font-medium' : 'text-gray-300'}`}
+              >
+                English (EN)
+              </button>
+              <button
+                onClick={() => changeLang('ru')}
+                className={`w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors ${lang === 'ru' ? 'text-blue-400 font-medium' : 'text-gray-300'}`}
+              >
+                Русский (RU)
+              </button>
+            </div>
+          )}
+        </div>
         {/* Background Gradients */}
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/20 blur-[120px] rounded-full pointer-events-none" />
@@ -483,7 +516,7 @@ export default function App() {
               <div className="flex items-center justify-between bg-black/40 border border-white/10 rounded-xl p-3 px-4">
                 <div className="flex items-center space-x-3">
                   <Globe className="h-5 w-5 text-purple-400" />
-                  <span className="text-sm font-medium text-gray-300">Server Status</span>
+                  <span className="text-sm font-medium text-gray-300">{t.serverStatus}</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className={`text-sm font-bold ${
@@ -554,7 +587,7 @@ export default function App() {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.223-.548.223l.188-2.85 5.18-4.68c.223-.198-.05-.31-.346-.11l-6.4 4.03-2.76-.864c-.6-.188-.61-.6.125-.89l10.8-4.16c.5-.188.94.108.79.89z"/>
               </svg>
-              <span>Support</span>
+              <span>{t.support}</span>
             </a>
           </div>
         </div>
