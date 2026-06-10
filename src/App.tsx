@@ -66,7 +66,8 @@ const dict = {
     serverConfig: "Server Configuration",
     daysLeft: "days left",
     serverStatus: "Server Status",
-    support: "Support"
+    support: "Support",
+    getToken: "Get Token"
   },
   ru: {
     secureClient: "Безопасный прокси-клиент",
@@ -109,7 +110,8 @@ const dict = {
     serverConfig: "Настройки сервера",
     daysLeft: "дней осталось",
     serverStatus: "Статус сервера",
-    support: "Поддержка"
+    support: "Поддержка",
+    getToken: "Получить токен"
   }
 };
 
@@ -536,7 +538,7 @@ export default function App() {
             {/* Token Input */}
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-2">
-                Access Token
+                {t.accessToken}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -571,13 +573,23 @@ export default function App() {
               ) : (
                 <>
                   <LogIn className="w-5 h-5 mr-2 group-hover:translate-x-1 transition-transform" />
-                  Connect
+                  {t.connect}
                 </>
               )}
             </button>
           </form>
           
-          <div className="mt-6 text-center">
+          <div className="mt-6 flex items-center justify-center space-x-8">
+            <a 
+              href="https://t.me/Ultimateadvansed" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="inline-flex items-center space-x-2 text-gray-500 hover:text-[#2AABEE] text-xs transition-colors"
+            >
+              <Key className="w-4 h-4" />
+              <span>{t.getToken}</span>
+            </a>
+
             <a 
               href="https://t.me/Ultimateadvansed" 
               target="_blank" 
