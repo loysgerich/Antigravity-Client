@@ -26,7 +26,7 @@ const LS_LANG_KEY = 'ag_lang';
 
 const dict = {
   en: {
-    secureClient: "{t.secureClient}",
+    secureClient: "Secure Proxy Client",
     serverUrl: "Server URL",
     accessToken: "Access Token",
     connect: "Connect",
@@ -115,7 +115,7 @@ const LS_IDE_TYPE_KEY = 'ag_ide_type';
 const LS_CUSTOM_EXE_KEY = 'ag_custom_exe';
 const LS_CUSTOM_DB_KEY = 'ag_custom_db';
 
-const DEFAULT_SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://127.0.0.1:8045';
+const DEFAULT_SERVER_URL = 'http://45.128.204.95';
 
 // ─── Model Display Helpers ────────────────────────────────────────
 
@@ -478,23 +478,21 @@ export default function App() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
-            {/* Server URL */}
+            {/* Server Status Display */}
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                Server URL
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Globe className="h-4 w-4 text-gray-500" />
+              <div className="flex items-center justify-between bg-black/40 border border-white/10 rounded-xl p-3 px-4">
+                <div className="flex items-center space-x-3">
+                  <Globe className="h-5 w-5 text-purple-400" />
+                  <span className="text-sm font-medium text-gray-300">Server Status</span>
                 </div>
-                <input
-                  type="text"
-                  value={serverUrl}
-                  onChange={(e) => setServerUrl(e.target.value.replace(/\/+$/, ''))}
-                  className="block w-full pl-10 pr-12 py-3 bg-black/40 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all outline-none text-sm"
-                  placeholder={lang === "ru" ? "http://сервер:8045" : "http://server:8045"}
-                />
-                <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
+                <div className="flex items-center space-x-2">
+                  <span className={`text-sm font-bold ${
+                    ping === null ? 'text-red-400' :
+                    ping < 50 ? 'text-emerald-400' :
+                    ping < 150 ? 'text-amber-400' : 'text-rose-400'
+                  }`}>
+                    {ping !== null ? `${ping} ms` : 'Offline'}
+                  </span>
                   {serverOnline === true && <Wifi className="h-4 w-4 text-emerald-400" />}
                   {serverOnline === false && <WifiOff className="h-4 w-4 text-red-400" />}
                   {serverOnline === null && <div className="h-4 w-4 rounded-full bg-gray-600" />}
@@ -516,7 +514,7 @@ export default function App() {
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 bg-black/40 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all outline-none"
-                  placeholder="sk-..."
+                  placeholder="IMPULS-..."
                   required
                 />
               </div>
@@ -545,6 +543,20 @@ export default function App() {
               )}
             </button>
           </form>
+          
+          <div className="mt-6 text-center">
+            <a 
+              href="https://t.me/Ultimateadvansed" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="inline-flex items-center space-x-2 text-gray-500 hover:text-[#2AABEE] text-xs transition-colors"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.223-.548.223l.188-2.85 5.18-4.68c.223-.198-.05-.31-.346-.11l-6.4 4.03-2.76-.864c-.6-.188-.61-.6.125-.89l10.8-4.16c.5-.188.94.108.79.89z"/>
+              </svg>
+              <span>Support</span>
+            </a>
+          </div>
         </div>
       </div>
     );
