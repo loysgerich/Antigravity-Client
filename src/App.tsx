@@ -71,7 +71,6 @@ const dict = {
     plan: "Plan"
   },
   ru: {
-    ...dict.en, // fallback
     secureClient: "Безопасный прокси-клиент",
     serverUrl: "Адрес сервера",
     accessToken: "Токен доступа",
