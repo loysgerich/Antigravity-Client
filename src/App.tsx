@@ -67,9 +67,11 @@ const dict = {
     daysLeft: "days left",
     serverStatus: "Server Status",
     support: "Support",
-    getToken: "Get Token"
+    getToken: "Get Token",
+    plan: "Plan"
   },
   ru: {
+    ...dict.en, // fallback
     secureClient: "Безопасный прокси-клиент",
     serverUrl: "Адрес сервера",
     accessToken: "Токен доступа",
@@ -111,7 +113,8 @@ const dict = {
     daysLeft: "дней осталось",
     serverStatus: "Статус сервера",
     support: "Поддержка",
-    getToken: "Получить токен"
+    getToken: "Получить токен",
+    plan: "Тариф"
   }
 };
 
@@ -208,6 +211,7 @@ export default function App() {
   const [ping, setPing] = useState<number | null>(null);
   const pingHistoryRef = useRef<number[]>([]);
   const [proxyRunning, setProxyRunning] = useState(false);
+  const [tier, setTier] = useState<number | null>(null);
 
   // ─── Load saved state ────────────────────────────────────────────
 
@@ -296,6 +300,7 @@ export default function App() {
             setExpiresAt(qData.expires_at || null);
             setCreditOverages(qData.enable_credit_overages);
             setModelPercentages(qData.models || {});
+            setTier(qData.tier !== undefined ? qData.tier : null);
           }
         } catch (e) {
           console.error('Failed to fetch quota', e);
@@ -348,6 +353,7 @@ export default function App() {
     setModels([]);
     setError('');
     setIdeSuccess(false);
+    setTier(null);
   };
 
   const handleRefresh = () => {
@@ -412,6 +418,7 @@ export default function App() {
             setExpiresAt(qData.expires_at || null);
           setCreditOverages(qData.enable_credit_overages);
           setModelPercentages(qData.models || {});
+          setTier(qData.tier !== undefined ? qData.tier : null);
         }
       } catch (e) {
         // ignore periodic failures
@@ -750,8 +757,15 @@ export default function App() {
               <h3 className="text-sm font-medium text-gray-300">{t.status}</h3>
             </div>
             <div className="text-2xl font-bold text-emerald-400 mb-1">{t.active}</div>
-            <div className="text-xs text-gray-500">
-              {expiresAt ? `${getRemainingDays(expiresAt)} ${t.daysLeft}` : t.tokenAuth}
+            <div className="flex flex-col text-xs text-gray-500 space-y-0.5">
+              {tier !== null && tier > 0 && (
+                <span className="font-semibold text-gray-300">
+                  {t.plan} X{tier}
+                </span>
+              )}
+              <span>
+                {expiresAt ? `${getRemainingDays(expiresAt)} ${t.daysLeft}` : t.tokenAuth}
+              </span>
             </div>
           </div>
 
