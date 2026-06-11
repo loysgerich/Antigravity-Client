@@ -57,8 +57,8 @@ const dict = {
     customDb: "Custom DB / AppData Path (Optional)",
     pathToVscdb: "Path to state.vscdb for portable installations.",
     done: "Done",
-    saveReconnect: "{t.saveReconnect}",
-    proxyUrlForIde: "{t.proxyUrlForIde}",
+    saveReconnect: "Save and Reconnect",
+    proxyUrlForIde: "Proxy URL for IDE:",
     error: "Error",
     offline: "Offline",
     availableModelsTitle: "Available Models",
@@ -68,7 +68,14 @@ const dict = {
     serverStatus: "Server Status",
     support: "Support",
     getToken: "Get Token",
-    plan: "Plan"
+    plan: "Plan",
+    checkForUpdates: "Check for Updates",
+    checkingUpdates: "Checking for updates...",
+    updateAvailable: "New Version Available",
+    updateBtn: "Update Now",
+    upToDate: "You have the latest version",
+    updateError: "Failed to check or install update",
+    updating: "Updating..."
   },
   ru: {
     secureClient: "Безопасный прокси-клиент",
@@ -113,7 +120,14 @@ const dict = {
     serverStatus: "Статус сервера",
     support: "Поддержка",
     getToken: "Получить токен",
-    plan: "Тариф"
+    plan: "Тариф",
+    checkForUpdates: "Проверить обновления",
+    checkingUpdates: "Проверка обновлений...",
+    updateAvailable: "Доступна новая версия",
+    updateBtn: "Обновить сейчас",
+    upToDate: "Установлена последняя версия",
+    updateError: "Не удалось проверить или установить обновление",
+    updating: "Обновление..."
   }
 };
 
@@ -204,6 +218,63 @@ export default function App() {
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Client Update States
+  const CURRENT_VERSION = '1.0.5';
+  const [updateInfo, setUpdateInfo] = useState<{
+    version: string;
+    name: string;
+    body: string;
+    asset_id: number;
+    size: number;
+  } | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updateError, setUpdateError] = useState('');
+  const [updating, setUpdating] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<'none' | 'up-to-date' | 'available' | 'error'>('none');
+
+  const checkUpdates = async (silent = false) => {
+    if (!silent) {
+      setCheckingUpdates(true);
+      setUpdateError('');
+      setUpdateStatus('none');
+    }
+    try {
+      const res = await fetch(`${serverUrl}/v1/client-update`);
+      if (!res.ok) {
+        throw new Error(`Failed to check updates: ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.version && data.version !== CURRENT_VERSION) {
+        setUpdateInfo(data);
+        setUpdateStatus('available');
+      } else {
+        setUpdateInfo(null);
+        setUpdateStatus('up-to-date');
+      }
+    } catch (e: any) {
+      console.error(e);
+      if (!silent) {
+        setUpdateError(e.message || 'Error checking for updates');
+        setUpdateStatus('error');
+      }
+    } finally {
+      if (!silent) setCheckingUpdates(false);
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!updateInfo) return;
+    setUpdating(true);
+    setUpdateError('');
+    try {
+      const downloadUrl = `${serverUrl}/v1/client-update/download/${updateInfo.asset_id}`;
+      await invoke('install_client_update', { downloadUrl });
+    } catch (e: any) {
+      setUpdateError(e.toString() || 'Failed to install update');
+      setUpdating(false);
+    }
+  };
   const [ideConnecting, setIdeConnecting] = useState(false);
   const [ideSuccess, setIdeSuccess] = useState(false);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
@@ -337,6 +408,12 @@ export default function App() {
       setLoading(false);
     }
   }, [serverUrl, checkServerHealth]);
+
+  useEffect(() => {
+    if (serverOnline) {
+      checkUpdates(true);
+    }
+  }, [serverOnline]);
 
   // ─── Handlers ────────────────────────────────────────────────────
 
@@ -743,6 +820,48 @@ export default function App() {
           </div>
         )}
 
+        {/* ─── Client Update Banner ────────────────────────────── */}
+        {updateStatus === 'available' && updateInfo && (
+          <div className="mb-6 backdrop-blur-xl bg-blue-500/10 border border-blue-500/30 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0 sm:space-x-4 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center space-x-3 text-left">
+              <div className="p-3 bg-blue-500/20 rounded-xl border border-blue-500/30 flex-shrink-0">
+                <Cpu className="w-6 h-6 text-blue-400 animate-pulse" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-white">
+                  {t.updateAvailable}: {updateInfo.name}
+                </h4>
+                <p className="text-xs text-gray-400 mt-1 max-w-xl truncate">
+                  {updateInfo.body || 'No release description provided.'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleInstallUpdate}
+              disabled={updating}
+              className="flex items-center space-x-2 px-5 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-800 text-white rounded-xl text-sm font-medium transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {updating ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>{t.updating}</span>
+                </>
+              ) : (
+                <>
+                  <span>{t.updateBtn}</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {updateError && (
+          <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center justify-between text-red-400 text-sm animate-in fade-in slide-in-from-top-2">
+            <span>{t.updateError}: {updateError}</span>
+            <button onClick={() => setUpdateError('')} className="text-xs font-semibold hover:underline">Dismiss</button>
+          </div>
+        )}
+
         {/* ─── Main Grid ───────────────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-6">
 
@@ -1028,6 +1147,53 @@ export default function App() {
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
                 />
                 <p className="text-xs text-gray-500">{t.pathToVscdb}</p>
+              </div>
+
+              <div className="border-t border-white/5 pt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">{t.checkForUpdates}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Current Version: {CURRENT_VERSION}</p>
+                  </div>
+                  <button
+                    onClick={() => checkUpdates(false)}
+                    disabled={checkingUpdates || updating}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl text-sm font-semibold border border-white/5 transition-colors flex items-center space-x-1.5 disabled:opacity-50"
+                  >
+                    {checkingUpdates && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{t.checkForUpdates}</span>
+                  </button>
+                </div>
+
+                {updateStatus === 'up-to-date' && (
+                  <p className="text-xs text-emerald-400">{t.upToDate}</p>
+                )}
+
+                {updateStatus === 'available' && updateInfo && (
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-blue-400">{t.updateAvailable}: {updateInfo.name}</span>
+                      <button
+                        onClick={handleInstallUpdate}
+                        disabled={updating}
+                        className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-semibold transition-colors flex items-center space-x-1"
+                      >
+                        {updating ? (
+                          <>
+                            <RefreshCw className="w-3 animate-spin" />
+                            <span>{t.updating}</span>
+                          </>
+                        ) : (
+                          <span>{t.updateBtn}</span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {updateStatus === 'error' && updateError && (
+                  <p className="text-xs text-red-400">{t.updateError}: {updateError}</p>
+                )}
               </div>
             </div>
             

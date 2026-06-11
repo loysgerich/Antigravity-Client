@@ -780,6 +780,68 @@ fn restore_original_state_all() {
     }
 }
 
+#[tauri::command]
+async fn install_client_update(app_handle: tauri::AppHandle, download_url: String) -> Result<(), String> {
+    eprintln!("[Client] Starting update installation. Download URL: {}", download_url);
+    
+    // 1. Download the MSI installer to a temp file
+    let client = reqwest::Client::new();
+    let resp = client.get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send download request: {}", e))?;
+        
+    if !resp.status().is_success() {
+        return Err(format!("Download request failed with status: {}", resp.status()));
+    }
+    
+    let temp_dir = std::env::temp_dir();
+    let msi_path = temp_dir.join("AntigravityClient_setup.msi");
+    
+    // Write body to file
+    let bytes = resp.bytes().await.map_err(|e| format!("Failed to read response bytes: {}", e))?;
+    std::fs::write(&msi_path, bytes).map_err(|e| format!("Failed to write MSI file: {}", e))?;
+    
+    eprintln!("[Client] MSI downloaded to {:?}", msi_path);
+    
+    // 2. Get current executable path
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+        
+    eprintln!("[Client] Current executable path: {:?}", current_exe);
+    
+    // 3. Spawn background script and exit
+    #[cfg(target_os = "windows")]
+    {
+        let ps_command = format!(
+            "Start-Sleep -Seconds 2; Start-Process msiexec.exe -ArgumentList '/i', '{}', '/passive', '/norestart' -Wait; Start-Process '{}'",
+            msi_path.to_string_lossy(),
+            current_exe.to_string_lossy()
+        );
+        
+        eprintln!("[Client] Spawning PowerShell command: {}", ps_command);
+        
+        std::process::Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-WindowStyle")
+            .arg("Hidden")
+            .arg("-Command")
+            .arg(ps_command)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn PowerShell installer script: {}", e))?;
+            
+        // Gracefully exit current Tauri app
+        app_handle.exit(0);
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("Auto-updates are only supported on Windows in this version.".to_string());
+    }
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -792,7 +854,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             inject_token_and_start_ide,
             stop_proxy,
-            get_proxy_status
+            get_proxy_status,
+            install_client_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
