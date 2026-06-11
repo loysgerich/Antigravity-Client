@@ -784,7 +784,15 @@ fn restore_original_state_all() {
 async fn install_client_update(app_handle: tauri::AppHandle, download_url: String) -> Result<(), String> {
     eprintln!("[Client] Starting update installation. Download URL: {}", download_url);
     
-    // 1. Download the MSI installer to a temp file
+    let temp_dir = std::env::temp_dir();
+    #[cfg(target_os = "windows")]
+    let msi_path = temp_dir.join("AntigravityClient_setup.msi");
+    #[cfg(target_os = "macos")]
+    let msi_path = temp_dir.join("AntigravityClient_setup.dmg");
+    #[cfg(target_os = "linux")]
+    let msi_path = temp_dir.join("AntigravityClient_setup.AppImage");
+    
+    // 1. Download the setup file
     let client = reqwest::Client::new();
     let resp = client.get(&download_url)
         .send()
@@ -795,14 +803,11 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
         return Err(format!("Download request failed with status: {}", resp.status()));
     }
     
-    let temp_dir = std::env::temp_dir();
-    let msi_path = temp_dir.join("AntigravityClient_setup.msi");
-    
     // Write body to file
     let bytes = resp.bytes().await.map_err(|e| format!("Failed to read response bytes: {}", e))?;
-    std::fs::write(&msi_path, bytes).map_err(|e| format!("Failed to write MSI file: {}", e))?;
+    std::fs::write(&msi_path, bytes).map_err(|e| format!("Failed to write setup file: {}", e))?;
     
-    eprintln!("[Client] MSI downloaded to {:?}", msi_path);
+    eprintln!("[Client] Setup file downloaded to {:?}", msi_path);
     
     // 2. Get current executable path
     let current_exe = std::env::current_exe()
@@ -810,7 +815,7 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
         
     eprintln!("[Client] Current executable path: {:?}", current_exe);
     
-    // 3. Spawn background script and exit
+    // 3. Spawn background script and exit based on OS
     #[cfg(target_os = "windows")]
     {
         let ps_command = format!(
@@ -834,9 +839,46 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
         app_handle.exit(0);
     }
     
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        return Err("Auto-updates are only supported on Windows in this version.".to_string());
+        let parent_dir = current_exe.parent().ok_or("No parent directory found")?;
+        let sh_command = format!(
+            "sleep 2; hdiutil attach -nobrowse -mountpoint /tmp/ag_mount '{}'; cp -R '/tmp/ag_mount/Antigravity Client.app' '{}'; hdiutil detach /tmp/ag_mount; open -n '{}'",
+            msi_path.to_string_lossy(),
+            parent_dir.to_string_lossy(),
+            current_exe.to_string_lossy()
+        );
+        
+        eprintln!("[Client] Spawning macOS shell command: {}", sh_command);
+        
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(sh_command)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn macOS shell installer: {}", e))?;
+            
+        app_handle.exit(0);
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        let sh_command = format!(
+            "sleep 2; chmod +x '{}'; mv '{}' '{}'; '{}' &",
+            msi_path.to_string_lossy(),
+            msi_path.to_string_lossy(),
+            current_exe.to_string_lossy(),
+            current_exe.to_string_lossy()
+        );
+        
+        eprintln!("[Client] Spawning Linux shell command: {}", sh_command);
+        
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(sh_command)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn Linux shell installer: {}", e))?;
+            
+        app_handle.exit(0);
     }
     
     Ok(())

@@ -233,6 +233,14 @@ export default function App() {
   const [updating, setUpdating] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<'none' | 'up-to-date' | 'available' | 'error'>('none');
 
+  const getOS = () => {
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    if (userAgent.includes("win")) return "windows";
+    if (userAgent.includes("mac")) return "macos";
+    if (userAgent.includes("linux")) return "linux";
+    return "windows";
+  };
+
   const checkUpdates = async (silent = false) => {
     if (!silent) {
       setCheckingUpdates(true);
@@ -240,7 +248,8 @@ export default function App() {
       setUpdateStatus('none');
     }
     try {
-      const res = await fetch(`${serverUrl}/v1/client-update`);
+      const os = getOS();
+      const res = await fetch(`${serverUrl}/v1/client-update?platform=${os}`);
       if (!res.ok) {
         throw new Error(`Failed to check updates: ${res.status}`);
       }
