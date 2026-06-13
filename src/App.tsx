@@ -220,7 +220,7 @@ export default function App() {
   const [error, setError] = useState('');
 
   // Client Update States
-  const CURRENT_VERSION = '1.0.5';
+  const CURRENT_VERSION = '1.0.8';
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     name: string;
@@ -757,8 +757,11 @@ export default function App() {
               <Shield className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Antigravity Client</h2>
-              <div className="flex items-center space-x-2 text-xs text-gray-400">
+              <div className="flex items-center space-x-2">
+                <h2 className="text-xl font-bold text-white">Antigravity Client</h2>
+                <span className="text-[10px] font-mono bg-white/10 text-gray-300 px-1.5 py-0.5 rounded-md border border-white/5">v{CURRENT_VERSION}</span>
+              </div>
+              <div className="flex items-center space-x-2 text-xs text-gray-400 mt-0.5">
                 <CheckCircle className="w-3 h-3 text-emerald-400" />
                 <span>{t.connected}. {t.ping}: {ping !== null ? `${ping} ms` : '...'}</span>
               </div>

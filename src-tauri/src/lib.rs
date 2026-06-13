@@ -94,6 +94,14 @@ async fn inject_token_and_start_ide(
         Err(e) => eprintln!("[Client] Warning: Failed to patch IDE language_server: {}", e),
     }
 
+    // 6c. Bypass macOS signature protection if running on macOS
+    #[cfg(target_os = "macos")]
+    {
+        eprintln!("[Client] Running on macOS. Applying signature bypass for IDE...");
+        let app_path = get_app_bundle_path(&ide_type, custom_exe_path.as_deref());
+        bypass_macos_signature_protection(&app_path);
+    }
+
     // 7. Start Antigravity IDE
     start_antigravity_ide(&ide_type, custom_exe_path.as_deref())?;
 
@@ -163,6 +171,70 @@ fn kill_running_antigravity(ide_type: &str) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn get_app_bundle_path(ide_type: &str, custom_exe_path: Option<&str>) -> std::path::PathBuf {
+    if let Some(exe) = custom_exe_path {
+        if !exe.is_empty() {
+            let exe_path = std::path::Path::new(exe);
+            for ancestor in exe_path.ancestors() {
+                if ancestor.extension().and_then(|ext| ext.to_str()) == Some("app") {
+                    return ancestor.to_path_buf();
+                }
+            }
+        }
+    }
+    
+    let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+    if let Some(home) = dirs::home_dir() {
+        let user_path = home.join("Applications").join(format!("{}.app", app_name));
+        if user_path.exists() {
+            return user_path;
+        }
+    }
+    std::path::PathBuf::from(format!("/Applications/{}.app", app_name))
+}
+
+#[cfg(target_os = "macos")]
+fn bypass_macos_signature_protection(app_path: &std::path::Path) {
+    eprintln!("[Client] Bypassing macOS signature protection for: {:?}", app_path);
+    if !app_path.exists() {
+        eprintln!("[Client] Warning: App bundle path does not exist, skipping signature bypass: {:?}", app_path);
+        return;
+    }
+    
+    // 1. Remove quarantine flag from the outer bundle itself (non-recursively) to bypass Gatekeeper.
+    // This succeeds even without Full Disk Access as long as the user owns the bundle directory.
+    let _ = std::process::Command::new("xattr")
+        .arg("-d")
+        .arg("com.apple.quarantine")
+        .arg(app_path)
+        .status();
+
+    // Try recursive xattr cleanup but ignore errors if some system frameworks are read-only
+    let _ = std::process::Command::new("xattr")
+        .arg("-cr")
+        .arg(app_path)
+        .status();
+
+    // 2. Sign the language_server binary if it exists and was modified
+    let lang_server = app_path.join("Contents/Resources/bin/language_server");
+    if lang_server.exists() {
+        let _ = std::process::Command::new("codesign")
+            .args(&["--force", "--sign", "-", &lang_server.to_string_lossy()])
+            .status();
+    }
+
+    // 3. Sign the main app bundle itself WITHOUT --deep to avoid "Operation not permitted"
+    // on unmodified system frameworks (e.g. Squirrel.framework) while successfully re-signing app.asar and main executable.
+    let status_codesign = std::process::Command::new("codesign")
+        .args(&["--force", "--sign", "-", &app_path.to_string_lossy()])
+        .status();
+    match status_codesign {
+        Ok(status) => eprintln!("[Client] codesign exited with status: {}", status),
+        Err(e) => eprintln!("[Client] Failed to run codesign: {}", e),
+    }
+}
+
 /// Find the IDE's main.js file path based on ide_type and optional custom exe path
 /// Find the IDE's resources directory based on ide_type and optional custom exe path
 fn get_ide_resources_path(ide_type: &str, custom_exe_path: Option<&str>) -> Option<std::path::PathBuf> {
@@ -203,6 +275,12 @@ fn get_ide_resources_path(ide_type: &str, custom_exe_path: Option<&str>) -> Opti
     #[cfg(target_os = "macos")]
     {
         let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        if let Some(home) = dirs::home_dir() {
+            let path = home.join("Applications").join(format!("{}.app/Contents/Resources", app_name));
+            if path.exists() {
+                return Some(path);
+            }
+        }
         let path = std::path::PathBuf::from(format!(
             "/Applications/{}.app/Contents/Resources", app_name
         ));
@@ -616,8 +694,9 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    // Use pgrep, but exclude zombies (-z) if possible, or just standard match since we already reaped our child
-                    if let Ok(output) = std::process::Command::new("pgrep").arg("-x").arg(exe_name).output() {
+                    // Use pgrep with -f to match against the full command line path, which is much more robust
+                    // since some Electron versions run with the generic process name 'Electron' but their path contains the app name.
+                    if let Ok(output) = std::process::Command::new("pgrep").arg("-f").arg(exe_name).output() {
                         output.status.success()
                     } else {
                         true // fallback if pgrep fails
