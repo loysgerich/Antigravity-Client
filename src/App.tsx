@@ -171,6 +171,41 @@ function formatModelName(id: string): string {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function CountdownTimer({ resetTime }: { resetTime: string }) {
+  const [timeLeft, setTimeLeft] = useState<string>('');
+
+  useEffect(() => {
+    const calculateTime = () => {
+      const target = new Date(resetTime).getTime();
+      const now = Date.now();
+      const diff = target - now;
+
+      if (diff <= 0) {
+        setTimeLeft('now');
+        return;
+      }
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+      const parts = [];
+      if (hours > 0) parts.push(`${hours}h`);
+      if (minutes > 0 || hours > 0) parts.push(`${minutes}m`);
+      parts.push(`${seconds}s`);
+
+      setTimeLeft(parts.join(' '));
+    };
+
+    calculateTime();
+    const interval = setInterval(calculateTime, 1000);
+    return () => clearInterval(interval);
+  }, [resetTime]);
+
+  if (!timeLeft) return null;
+  return <span className="text-[10px] text-amber-500 font-medium ml-1 flex items-center gap-0.5">⏳ {timeLeft}</span>;
+}
+
 // ─── App Component ────────────────────────────────────────────────
 
 export default function App() {
@@ -212,6 +247,7 @@ export default function App() {
   // Main App State
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPercentages, setModelPercentages] = useState<Record<string, number>>({});
+  const [modelResets, setModelResets] = useState<Record<string, string>>({});
   const [totalCredits, setTotalCredits] = useState<number | null>(null);
   const [creditOverages, setCreditOverages] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -220,7 +256,7 @@ export default function App() {
   const [error, setError] = useState('');
 
   // Client Update States
-  const CURRENT_VERSION = '1.0.9';
+  const CURRENT_VERSION = '1.0.10';
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     name: string;
@@ -379,6 +415,7 @@ export default function App() {
             setExpiresAt(qData.expires_at || null);
             setCreditOverages(qData.enable_credit_overages);
             setModelPercentages(qData.models || {});
+            setModelResets(qData.resets || {});
             setTier(qData.tier !== undefined ? qData.tier : null);
           }
         } catch (e) {
@@ -436,6 +473,7 @@ export default function App() {
     setToken('');
     setConnected(false);
     setModels([]);
+    setModelResets({});
     setError('');
     setIdeSuccess(false);
     setTier(null);
@@ -503,6 +541,7 @@ export default function App() {
             setExpiresAt(qData.expires_at || null);
           setCreditOverages(qData.enable_credit_overages);
           setModelPercentages(qData.models || {});
+          setModelResets(qData.resets || {});
           setTier(qData.tier !== undefined ? qData.tier : null);
         }
       } catch (e) {
@@ -995,6 +1034,10 @@ export default function App() {
                           ?? modelPercentages[model.id.replace('-thinking', '')]
                           ?? modelPercentages[model.id.replace(/-high|-medium|-low/g, '')]
                           ?? modelPercentages[model.id.replace(/-high|-medium/g, '-low')];
+                        const resetTime = modelResets[model.id]
+                          ?? modelResets[model.id.replace('-thinking', '')]
+                          ?? modelResets[model.id.replace(/-high|-medium|-low/g, '')]
+                          ?? modelResets[model.id.replace(/-high|-medium/g, '-low')];
                         return (
                           <div
                             key={model.id}
@@ -1007,9 +1050,14 @@ export default function App() {
                                   {formatModelName(model.id)}
                                 </span>
                               </div>
-                              {pct !== undefined && (
-                                <span className="text-[10px] text-gray-500 font-mono">{pct}%</span>
-                              )}
+                              <div className="flex items-center space-x-1.5">
+                                {pct !== undefined && pct < 100 && resetTime && (
+                                  <CountdownTimer resetTime={resetTime} />
+                                )}
+                                {pct !== undefined && (
+                                  <span className="text-[10px] text-gray-500 font-mono">{pct}%</span>
+                                )}
+                              </div>
                             </div>
                             {pct !== undefined && (
                               <div className="w-full bg-white/10 rounded-full h-1 mt-1 overflow-hidden">
