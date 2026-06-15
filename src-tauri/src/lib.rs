@@ -146,7 +146,10 @@ fn kill_running_antigravity(ide_type: &str) {
     {
         let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
         let _ = std::process::Command::new("pkill")
-            .args(["-f", app_name])
+            .args(["-x", app_name])
+            .output();
+        let _ = std::process::Command::new("pkill")
+            .args(["-x", "language_server"])
             .output();
     }
     #[cfg(target_os = "windows")]
@@ -216,12 +219,31 @@ fn bypass_macos_signature_protection(app_path: &std::path::Path) {
         .arg(app_path)
         .status();
 
-    // 2. Sign the language_server binary if it exists and was modified
-    let lang_server = app_path.join("Contents/Resources/bin/language_server");
-    if lang_server.exists() {
-        let _ = std::process::Command::new("codesign")
-            .args(&["--force", "--sign", "-", &lang_server.to_string_lossy()])
-            .status();
+    // 2. Sign all language_server binary variations if they exist
+    let bin_dirs = [
+        app_path.join("Contents/Resources/bin"),
+        app_path.join("Contents/Resources/app/extensions/antigravity/bin"),
+    ];
+
+    let binary_names = [
+        "language_server.exe",
+        "language_server",
+        "language_server_macos_arm",
+        "language_server_macos_x64",
+        "language_server_linux_x64",
+    ];
+
+    for bin_dir in &bin_dirs {
+        if bin_dir.exists() {
+            for name in &binary_names {
+                let bin_path = bin_dir.join(name);
+                if bin_path.exists() {
+                    let _ = std::process::Command::new("codesign")
+                        .args(&["--force", "--sign", "-", &bin_path.to_string_lossy()])
+                        .status();
+                }
+            }
+        }
     }
 
     // 3. Sign the main app bundle itself WITHOUT --deep to avoid "Operation not permitted"
@@ -353,20 +375,31 @@ fn patch_ide_language_server(ide_type: &str, custom_exe_path: Option<&str>) -> R
         }
     };
 
-    let bin_dir = resources_dir.join("bin");
-    if !bin_dir.exists() {
-        return Ok(false);
-    }
+    let bin_dirs = [
+        resources_dir.join("bin"),
+        resources_dir.join("app/extensions/antigravity/bin"),
+    ];
 
-    let binary_names = ["language_server.exe", "language_server"];
+    let binary_names = [
+        "language_server.exe",
+        "language_server",
+        "language_server_macos_arm",
+        "language_server_macos_x64",
+        "language_server_linux_x64",
+    ];
+
     let mut patched = false;
 
-    for name in &binary_names {
-        let bin_path = bin_dir.join(name);
-        if bin_path.exists() {
-            eprintln!("[Client] Found language server binary at: {:?}", bin_path);
-            if patch_binary_file(&bin_path)? {
-                patched = true;
+    for bin_dir in &bin_dirs {
+        if bin_dir.exists() {
+            for name in &binary_names {
+                let bin_path = bin_dir.join(name);
+                if bin_path.exists() {
+                    eprintln!("[Client] Found language server binary at: {:?}", bin_path);
+                    if patch_binary_file(&bin_path)? {
+                        patched = true;
+                    }
+                }
             }
         }
     }
@@ -440,16 +473,22 @@ fn patch_binary_file(path: &std::path::Path) -> Result<bool, String> {
     let mut patched_any = false;
     for (from, to) in &replacements {
         assert_eq!(from.len(), to.len(), "Replacement lengths must match exactly!");
-        
+        if from.is_empty() {
+            continue;
+        }
+        let first_byte = from[0];
+        let limit = content.len().saturating_sub(from.len());
         let mut i = 0;
-        while i + from.len() <= content.len() {
-            if content[i..i + from.len()] == **from {
-                content[i..i + from.len()].copy_from_slice(to);
-                patched_any = true;
-                i += from.len();
-            } else {
-                i += 1;
+        while i <= limit {
+            if content[i] == first_byte {
+                if content[i..i + from.len()] == **from {
+                    content[i..i + from.len()].copy_from_slice(to);
+                    patched_any = true;
+                    i += from.len();
+                    continue;
+                }
             }
+            i += 1;
         }
     }
 
@@ -631,9 +670,9 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
     if child_opt.is_none() {
         #[cfg(target_os = "macos")]
         {
-            let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+            let app_path = get_app_bundle_path(ide_type, custom_exe_path);
             child_opt = std::process::Command::new("open")
-                .args(["-n", "-a", app_name])
+                .args(["-n", &app_path.to_string_lossy()])
                 .spawn().ok();
         }
         #[cfg(target_os = "windows")]
@@ -758,12 +797,26 @@ fn restore_files(ide_type: &str) -> Result<(), String> {
         }
     }
 
-    let bin_dir = resources_dir.join("bin");
-    if bin_dir.exists() {
-        for name in &["language_server.exe", "language_server"] {
-            let bin_path = bin_dir.join(name);
-            if bin_path.exists() {
-                paths_to_restore.push(bin_path);
+    let bin_dirs = [
+        resources_dir.join("bin"),
+        resources_dir.join("app/extensions/antigravity/bin"),
+    ];
+
+    let binary_names = [
+        "language_server.exe",
+        "language_server",
+        "language_server_macos_arm",
+        "language_server_macos_x64",
+        "language_server_linux_x64",
+    ];
+
+    for bin_dir in &bin_dirs {
+        if bin_dir.exists() {
+            for name in &binary_names {
+                let bin_path = bin_dir.join(name);
+                if bin_path.exists() {
+                    paths_to_restore.push(bin_path);
+                }
             }
         }
     }

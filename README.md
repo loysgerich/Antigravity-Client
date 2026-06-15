@@ -1,7 +1,56 @@
-# Tauri + React + Typescript
+# Antigravity Client (v1.0.11)
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+GUI-клиент и локальный прокси-сервер для интеграции и перенаправления запросов авторизации/API из **Antigravity 2.0** и **Antigravity IDE** на менеджер пула аккаунтов.
 
-## Recommended IDE Setup
+## 🏗 Архитектура запросов
+```
+IDE (VS Code / JetBrains) 
+   --> Локальный прокси Клиента (порт 8047) 
+   --> Antigravity-Manager (порт 8045 или 8055) 
+   --> Google Backend
+```
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+---
+
+## 🚀 Что было сделано в версии 1.0.11
+
+1. **Исправление самозавершения (вылета) на macOS**:
+   * Заменена утилита `pkill -f` на `pkill -x` при очистке процессов IDE. Это предотвращает случайное закрытие самого клиента, если его рабочая директория содержит слово `Antigravity`.
+
+2. **Обход ограничений прав TCC (Operation not permitted)**:
+   * Логика доработана для запуска IDE из домашней папки пользователя (`~/Applications/`), где macOS не накладывает жестких ограничений на модификацию ресурсов и подпись.
+   * Команда `open` теперь запускает приложения по их абсолютному пути из `~/Applications`, чтобы гарантировать использование модифицированной версии.
+
+3. **Оптимизация производительности патчинга**:
+   * В функции `patch_binary_file` добавлен быстрый пропуск несовпадающих байтов (поиск по первому байту перед сравнением слайсов). Время патчинга языкового сервера (~50 МБ) в режиме отладки (`tauri dev`) сократилось с 30–50 секунд до менее чем 1 секунды.
+
+4. **Полная поддержка Antigravity IDE**:
+   * Добавлена поддержка альтернативного пути к языковому серверу: `Contents/Resources/app/extensions/antigravity/bin/language_server_macos_arm`.
+   * Добавлена автоматическая переподпись (ad-hoc подпись `codesign --force --sign -`) для всех модифицированных бинарников языкового сервера на macOS. Это исключает падение процессов с ошибкой ядра `EXC_BAD_SIGNATURE`.
+
+5. **Автоматизация релизов**:
+   * Создан скрипт `push_to_github.sh` для быстрого релиза.
+
+---
+
+## 🛠 Запуск и разработка
+
+Для запуска клиента в режиме разработки:
+```bash
+npm run tauri dev
+```
+
+Для сборки продакшн-версии:
+```bash
+npm run tauri build
+```
+
+---
+
+## 📦 Публикация изменений и релиз
+
+Для отправки изменений в репозиторий и создания тега `v1.0.11` выполните:
+```bash
+chmod +x push_to_github.sh && ./push_to_github.sh
+```
+Скрипт автоматически применит правильные настройки Git, сделает коммит, отправит его в ветку `master` и создаст тег релиза.

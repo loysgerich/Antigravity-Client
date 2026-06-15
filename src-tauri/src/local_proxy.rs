@@ -346,6 +346,10 @@ async fn proxy_request(
         }
     };
 
+    if path.contains("fetchUserInfo") && status.is_success() {
+        eprintln!("[LocalProxy] fetchUserInfo response body: {}", String::from_utf8_lossy(&resp_bytes));
+    }
+
     let resp = builder
         .body(http_body_util::Full::new(resp_bytes))
         .unwrap_or_else(|_| {
