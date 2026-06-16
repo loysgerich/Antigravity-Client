@@ -890,7 +890,7 @@ export default function App() {
             <button
               onClick={handleInstallUpdate}
               disabled={updating}
-              className="flex items-center space-x-2 px-5 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-800 text-white rounded-xl text-sm font-medium transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] disabled:opacity-70 disabled:cursor-not-allowed"
+              className="flex-shrink-0 whitespace-nowrap flex items-center space-x-2 px-5 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-800 text-white rounded-xl text-sm font-medium transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {updating ? (
                 <>
@@ -1236,7 +1236,7 @@ export default function App() {
                       <button
                         onClick={handleInstallUpdate}
                         disabled={updating}
-                        className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-semibold transition-colors flex items-center space-x-1"
+                        className="flex-shrink-0 whitespace-nowrap px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-semibold transition-colors flex items-center space-x-1"
                       >
                         {updating ? (
                           <>
