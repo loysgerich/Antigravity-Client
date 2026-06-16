@@ -5,6 +5,8 @@ import {
   Server, CheckCircle, XCircle, Cpu, Globe, Settings,
   Wifi, WifiOff, LogOut, Square, Activity, ChevronDown
 } from 'lucide-react';
+import pkg from '../package.json';
+
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -256,7 +258,7 @@ export default function App() {
   const [error, setError] = useState('');
 
   // Client Update States
-  const CURRENT_VERSION = '1.0.10';
+  const CURRENT_VERSION = pkg.version;
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     name: string;
