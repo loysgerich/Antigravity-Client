@@ -20,15 +20,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             label: Windows-x64
 
-          # ── macOS Intel ──────────────────────────────────
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            label: macOS-Intel
-
-          # ── macOS Apple Silicon ───────────────────────────
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            label: macOS-ARM64
 
           # ── Linux ────────────────────────────────────────
           - platform: ubuntu-22.04
@@ -94,7 +85,6 @@ jobs:
 
             **Downloads:**
             - 🪟 **Windows**: `.msi` or `.exe` installer
-            - 🍎 **macOS**: `.dmg` disk image
             - 🐧 **Linux**: `.deb` package or `.AppImage`
           releaseDraft: true
           prerelease: false

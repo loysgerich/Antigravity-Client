@@ -4,8 +4,8 @@ use futures_util::{StreamExt, SinkExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub async fn start_tunnel_worker(server_url: String, token: String) {
-    eprintln!("[Tunnel] Starting tunnel pool with 5 workers");
-    for _ in 0..5 {
+    eprintln!("[Tunnel] Starting tunnel pool with 12 workers");
+    for _ in 0..12 {
         let url = server_url.clone();
         let tok = token.clone();
         tokio::spawn(async move {
@@ -104,8 +104,8 @@ async fn tunnel_loop(server_url: String, token: String) {
             }
             Err(e) => {
                 eprintln!("[Tunnel] Failed to connect: {}. Retrying in 5s...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         }
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
