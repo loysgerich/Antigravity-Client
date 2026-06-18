@@ -20,17 +20,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             label: Windows-x64
 
-
-          # ── macOS Intel ──────────────────────────────────
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            label: macOS-Intel
-
-          # ── macOS Apple Silicon ───────────────────────────
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            label: macOS-ARM64
-
           # ── Linux ────────────────────────────────────────
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -95,8 +84,7 @@ jobs:
 
             **Downloads:**
             - 🪟 **Windows**: `.msi` or `.exe` installer
-            - 🍎 **macOS**: `.dmg` disk image
-            - 🐧 **Linux**: `.deb` package or `.AppImage`
+            - 🐧 **Linux**: `.deb`, `.rpm` package or `.AppImage`
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
