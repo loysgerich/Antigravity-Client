@@ -572,6 +572,7 @@ fn inject_to_sqlite(token: &str, proxy_url: &str, email: &str, expiry: i64, ide_
     }
 
     let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open DB: {}", e))?;
+    let _ = conn.execute("PRAGMA journal_mode=DELETE;", []);
 
     // Create OAuth info (simulated for the client)
     let oauth_info = protobuf::create_oauth_info(token, token, expiry, false, None, Some(email));
@@ -623,6 +624,7 @@ pub fn clear_proxy_settings(ide_type: &str) -> Result<(), String> {
     if let Ok(db_path) = get_db_path(ide_type, None) {
         if db_path.exists() {
             if let Ok(conn) = Connection::open(&db_path) {
+                let _ = conn.execute("PRAGMA journal_mode=DELETE;", []);
                 let _ = conn.execute(
                     "DELETE FROM ItemTable WHERE key = ?",
                     ["antigravity.proxyBaseUrl"],

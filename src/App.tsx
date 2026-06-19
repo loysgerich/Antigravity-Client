@@ -7,6 +7,50 @@ import {
 } from 'lucide-react';
 import pkg from '../package.json';
 
+async function rustFetch(url: string, options: any = {}): Promise<Response> {
+  const method = options.method || 'GET';
+  const headers = options.headers || {};
+  const body = options.body || null;
+  
+  try {
+    const responseText = await invoke<string>('request_server', {
+      method,
+      url,
+      headers,
+      body,
+    });
+    
+    return {
+      ok: true,
+      status: 200,
+      json: async () => JSON.parse(responseText),
+      text: async () => responseText,
+    } as Response;
+  } catch (err: any) {
+    console.error("rustFetch error", err);
+    let status = 500;
+    let text = typeof err === 'string' ? err : (err.message || err.toString());
+    if (typeof text === 'string' && text.startsWith('HTTP ')) {
+      const parts = text.split(' : ');
+      status = parseInt(parts[0].replace('HTTP ', ''), 10) || 500;
+      text = parts.slice(1).join(' : ');
+    }
+    
+    return {
+      ok: false,
+      status,
+      json: async () => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return { error: text };
+        }
+      },
+      text: async () => text,
+    } as Response;
+  }
+}
+
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -45,7 +89,7 @@ const dict = {
     server: "Server",
     proxyPing: "Proxy endpoint ping",
     ready: "Ready to Code?",
-    connectToIDE: "Connect to Antigravity IDE with your secure proxy token. A local proxy on port 8046 will route all IDE requests through the Manager.",
+    connectToIDE: "Connect to Antigravity IDE with your secure proxy token. A local proxy on port 8047 will route all IDE requests through the Manager.",
     localProxy: "Local Proxy Active on",
     stop: "Stop",
     ideLaunched: "IDE launched successfully! Proxy running.",
@@ -97,7 +141,7 @@ const dict = {
     server: "Сервер",
     proxyPing: "Пинг до прокси",
     ready: "Готовы программировать?",
-    connectToIDE: "Подключите Antigravity IDE, используя ваш токен. Локальный прокси на порту 8046 перенаправит все запросы IDE через Менеджер.",
+    connectToIDE: "Подключите Antigravity IDE, используя ваш токен. Локальный прокси на порту 8047 перенаправит все запросы IDE через Менеджер.",
     localProxy: "Локальный прокси запущен на",
     stop: "Остановить",
     ideLaunched: "IDE успешно запущена! Прокси работает.",
@@ -287,7 +331,7 @@ export default function App() {
     }
     try {
       const os = getOS();
-      const res = await fetch(`${serverUrl}/v1/client-update?platform=${os}`);
+      const res = await rustFetch(`${serverUrl}/v1/client-update?platform=${os}`);
       if (!res.ok) {
         throw new Error(`Failed to check updates: ${res.status}`);
       }
@@ -359,9 +403,8 @@ export default function App() {
   const checkServerHealth = useCallback(async (url: string) => {
     const startTime = performance.now();
     try {
-      const res = await fetch(`${url}/health`, { 
+      const res = await rustFetch(`${url}/health`, { 
         method: 'GET',
-        signal: AbortSignal.timeout(5000),
       });
       const endTime = performance.now();
       if (res.ok) {
@@ -394,11 +437,10 @@ export default function App() {
     setError('');
     
     try {
-      const res = await fetch(`${serverBase}/v1/models`, {
+      const res = await rustFetch(`${serverBase}/v1/models`, {
         headers: {
           'Authorization': `Bearer ${tokenToUse}`,
         },
-        signal: AbortSignal.timeout(10000),
       });
 
       if (res.ok) {
@@ -407,9 +449,8 @@ export default function App() {
         setModels(modelList);
         
         try {
-          const qRes = await fetch(`${serverBase}/v1/quota`, {
+          const qRes = await rustFetch(`${serverBase}/v1/quota`, {
             headers: { 'Authorization': `Bearer ${tokenToUse}` },
-            signal: AbortSignal.timeout(5000),
           });
           if (qRes.ok) {
             const qData = await qRes.json();
@@ -533,9 +574,8 @@ export default function App() {
     if (!connected || !token) return;
     const fetchQuota = async () => {
       try {
-        const qRes = await fetch(`${serverUrl}/v1/quota`, {
+        const qRes = await rustFetch(`${serverUrl}/v1/quota`, {
           headers: { 'Authorization': `Bearer ${token}` },
-          signal: AbortSignal.timeout(5000),
         });
         if (qRes.ok) {
           const qData = await qRes.json();
@@ -579,7 +619,7 @@ export default function App() {
     try {
       const newState = !creditOverages;
       setCreditOverages(newState); // optimistic update
-      await fetch(`${serverUrl}/v1/quota/config`, {
+      await rustFetch(`${serverUrl}/v1/quota/config`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1084,7 +1124,7 @@ export default function App() {
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">{t.ready}</h2>
           <p className="text-gray-400 max-w-lg mb-8">
-            Connect to Antigravity IDE with your secure proxy token. A local proxy on port 8046 will route all IDE requests through the Manager.
+            Connect to Antigravity IDE with your secure proxy token. A local proxy on port 8047 will route all IDE requests through the Manager.
           </p>
 
           {/* Proxy Status Badge */}
@@ -1092,7 +1132,7 @@ export default function App() {
             <div className="mb-6 flex items-center space-x-3">
               <div className="flex items-center space-x-2 text-emerald-400 bg-emerald-400/10 px-4 py-3 rounded-xl border border-emerald-400/20">
                 <Activity className="w-4 h-4 animate-pulse" />
-                <span className="text-sm font-medium">{t.localProxy} :8046</span>
+                <span className="text-sm font-medium">{t.localProxy} :8047</span>
               </div>
               <button
                 onClick={handleStopProxy}

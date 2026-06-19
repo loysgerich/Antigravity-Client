@@ -21,7 +21,7 @@ jobs:
             label: Windows-x64
 
           # ── macOS Intel ──────────────────────────────────
-          - platform: macos-latest
+          - platform: macos-13
             target: x86_64-apple-darwin
             label: macOS-Intel
 

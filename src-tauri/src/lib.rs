@@ -476,19 +476,16 @@ fn patch_binary_file(path: &std::path::Path) -> Result<bool, String> {
         if from.is_empty() {
             continue;
         }
-        let first_byte = from[0];
-        let limit = content.len().saturating_sub(from.len());
         let mut i = 0;
-        while i <= limit {
-            if content[i] == first_byte {
-                if content[i..i + from.len()] == **from {
-                    content[i..i + from.len()].copy_from_slice(to);
-                    patched_any = true;
-                    i += from.len();
-                    continue;
-                }
+        while i + from.len() <= content.len() {
+            if let Some(pos) = content[i..].windows(from.len()).position(|w| w == *from) {
+                let match_pos = i + pos;
+                content[match_pos..match_pos + from.len()].copy_from_slice(to);
+                patched_any = true;
+                i = match_pos + from.len();
+            } else {
+                break;
             }
-            i += 1;
         }
     }
 
@@ -1016,6 +1013,35 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
     Ok(())
 }
 
+#[tauri::command]
+async fn request_server(
+    method: String,
+    url: String,
+    headers: std::collections::HashMap<String, String>,
+    body: Option<String>,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let mut req = match method.to_uppercase().as_str() {
+        "POST" => client.post(&url),
+        _ => client.get(&url),
+    };
+    for (k, v) in headers {
+        req = req.header(k, v);
+    }
+    if let Some(b) = body {
+        req = req.body(b);
+    }
+    req = req.timeout(std::time::Duration::from_secs(10));
+    let res = req.send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    let text = res.text().await.map_err(|e| e.to_string())?;
+    if status.is_success() {
+        Ok(text)
+    } else {
+        Err(format!("HTTP {} : {}", status.as_u16(), text))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1029,7 +1055,8 @@ pub fn run() {
             inject_token_and_start_ide,
             stop_proxy,
             get_proxy_status,
-            install_client_update
+            install_client_update,
+            request_server
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
