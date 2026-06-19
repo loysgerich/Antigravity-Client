@@ -95,7 +95,9 @@ jobs:
             **Downloads:**
             - 🪟 **Windows**: `.msi` or `.exe` installer
             - 🍎 **macOS**: `.dmg` disk image
-            - 🐧 **Linux**: `.deb`, `.rpm` package or `.AppImage`
-          releaseDraft: true
+            - 🐧 **Linux**: `.deb`, `.rpm` or `.AppImage`
+          releaseDraft: false
           prerelease: false
+          owner: loysgerich
+          repo: Antigravity-IDE-Client
           args: --target ${{ matrix.target }}
