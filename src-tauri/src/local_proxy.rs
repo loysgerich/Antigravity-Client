@@ -8,6 +8,10 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::watch;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, StreamBody};
+use hyper::body::Frame;
+use futures_util::TryStreamExt;
 
 /// Configuration for the local proxy
 #[derive(Clone)]
@@ -123,12 +127,19 @@ async fn handle_connection(
     }
 }
 
+// Helper to box static body
+fn full_box(data: bytes::Bytes) -> BoxBody<bytes::Bytes, std::io::Error> {
+    http_body_util::Full::new(data)
+        .map_err(|e| match e {})
+        .boxed()
+}
+
 /// Proxy a single request to the Manager
 async fn proxy_request(
     req: hyper::Request<hyper::body::Incoming>,
     config: Arc<ProxyConfig>,
     client: Arc<reqwest::Client>,
-) -> Result<hyper::Response<http_body_util::Full<bytes::Bytes>>, Infallible> {
+) -> Result<hyper::Response<BoxBody<bytes::Bytes, std::io::Error>>, Infallible> {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let mut path = uri.path().to_string();
@@ -155,11 +166,11 @@ async fn proxy_request(
         eprintln!("[LocalProxy] Intercepting OPTIONS request for CORS: {}", path);
         let resp = hyper::Response::builder()
             .status(200)
-            .header("Access-Control-Allow-Origin", cors_origin)
+            .header("Access-Control-Allow-Origin", &cors_origin)
             .header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
             .header("Access-Control-Allow-Headers", "*")
             .header("Access-Control-Max-Age", "86400")
-            .body(http_body_util::Full::new(bytes::Bytes::from("")))
+            .body(full_box(bytes::Bytes::from("")))
             .unwrap();
         return Ok(resp);
     }
@@ -178,7 +189,7 @@ async fn proxy_request(
             .status(200)
             .header("Content-Type", "application/json")
             .header("Access-Control-Allow-Origin", &cors_origin)
-            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .body(full_box(bytes::Bytes::from(mock_json)))
             .unwrap();
         
         return Ok(resp);
@@ -198,8 +209,8 @@ async fn proxy_request(
         let resp = hyper::Response::builder()
             .status(200)
             .header("Content-Type", "application/json")
-            .header("Access-Control-Allow-Origin", cors_origin)
-            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .header("Access-Control-Allow-Origin", &cors_origin)
+            .body(full_box(bytes::Bytes::from(mock_json)))
             .unwrap();
         
         return Ok(resp);
@@ -222,7 +233,7 @@ async fn proxy_request(
             .status(200)
             .header("Content-Type", "application/json")
             .header("Access-Control-Allow-Origin", &cors_origin)
-            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .body(full_box(bytes::Bytes::from(mock_json)))
             .unwrap();
         
         return Ok(resp);
@@ -236,7 +247,7 @@ async fn proxy_request(
             .status(200)
             .header("Content-Type", "application/json")
             .header("Access-Control-Allow-Origin", &cors_origin)
-            .body(http_body_util::Full::new(bytes::Bytes::from(mock_json)))
+            .body(full_box(bytes::Bytes::from(mock_json)))
             .unwrap();
         
         return Ok(resp);
@@ -249,7 +260,7 @@ async fn proxy_request(
             .status(200)
             .header("Content-Type", "application/json")
             .header("Access-Control-Allow-Origin", &cors_origin)
-            .body(http_body_util::Full::new(bytes::Bytes::from("{}")))
+            .body(full_box(bytes::Bytes::from("{}")))
             .unwrap();
         return Ok(resp);
     }
@@ -273,16 +284,13 @@ async fn proxy_request(
     eprintln!("[LocalProxy] {} {} -> {}", method, uri, target_url);
 
     // Read the incoming body
-    use http_body_util::BodyExt;
     let body_bytes = match req.into_body().collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(e) => {
             eprintln!("[LocalProxy] Failed to read body: {}", e);
             let resp = hyper::Response::builder()
                 .status(502)
-                .body(http_body_util::Full::new(bytes::Bytes::from(
-                    format!("Failed to read request body: {}", e),
-                )))
+                .body(full_box(bytes::Bytes::from(format!("Failed to read request body: {}", e))))
                 .unwrap();
             return Ok(resp);
         }
@@ -307,9 +315,7 @@ async fn proxy_request(
             eprintln!("[LocalProxy] Upstream error: {}", e);
             let resp = hyper::Response::builder()
                 .status(502)
-                .body(http_body_util::Full::new(bytes::Bytes::from(
-                    format!("Upstream error: {}", e),
-                )))
+                .body(full_box(bytes::Bytes::from(format!("Upstream error: {}", e))))
                 .unwrap();
             return Ok(resp);
         }
@@ -326,7 +332,7 @@ async fn proxy_request(
     // Copy response headers
     for (name, value) in response.headers() {
         let name_lower = name.as_str().to_lowercase();
-        // Skip hop-by-hop and length-related headers because we reconstruct a Full body
+        // Skip hop-by-hop and length-related headers because we reconstruct a Stream body
         if name_lower == "transfer-encoding" || name_lower == "content-length" || name_lower == "connection" {
             continue;
         }
@@ -337,23 +343,20 @@ async fn proxy_request(
         }
     }
 
-    // Read response body (for now, read full body — streaming can be added later)
-    let resp_bytes = match response.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("[LocalProxy] Failed to read response: {}", e);
-            bytes::Bytes::from(format!("Failed to read response: {}", e))
-        }
-    };
+    // Convert reqwest body to a Stream of hyper Frames
+    let stream = response.bytes_stream()
+        .map_ok(Frame::data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+    let body = StreamBody::new(stream).boxed();
 
     if path.contains("fetchUserInfo") && status.is_success() {
         eprintln!("[LocalProxy] fetchUserInfo response body: {}", String::from_utf8_lossy(&resp_bytes));
     }
 
     let resp = builder
-        .body(http_body_util::Full::new(resp_bytes))
+        .body(body)
         .unwrap_or_else(|_| {
-            hyper::Response::new(http_body_util::Full::new(bytes::Bytes::from("Internal error")))
+            hyper::Response::new(full_box(bytes::Bytes::from("Internal error")))
         });
 
     Ok(resp)

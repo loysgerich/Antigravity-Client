@@ -1047,8 +1047,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
-            eprintln!("[Client] Application startup. Running cleanup to ensure clean state...");
-            restore_original_state_all();
+            eprintln!("[Client] Application startup. (Cleanup bypassed to preserve settings)");
+            // restore_original_state_all();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1062,8 +1062,8 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::Exit = event {
-                eprintln!("[Client] Tauri application is exiting. Running final cleanup...");
-                restore_original_state_all();
+                eprintln!("[Client] Tauri application is exiting. (Cleanup bypassed to preserve settings)");
+                // restore_original_state_all();
             }
         });
 }
