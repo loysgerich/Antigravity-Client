@@ -70,9 +70,11 @@ async fn inject_token_and_start_ide(
 
     // 6. Patch IDE main.js to route hardcoded Google API URLs through our local proxy
     eprintln!("[Client] Patching IDE main.js to redirect API traffic through local proxy...");
+    let mut files_patched = false;
     match patch_ide_main_js(&ide_type, custom_exe_path.as_deref()) {
         Ok(patched) => {
             if patched {
+                files_patched = true;
                 eprintln!("[Client] IDE main.js patched successfully");
             } else {
                 eprintln!("[Client] IDE main.js already patched or not found");
@@ -86,12 +88,21 @@ async fn inject_token_and_start_ide(
     match patch_ide_language_server(&ide_type, custom_exe_path.as_deref()) {
         Ok(patched) => {
             if patched {
+                files_patched = true;
                 eprintln!("[Client] IDE language_server patched successfully");
             } else {
                 eprintln!("[Client] IDE language_server already patched or not found");
             }
         }
         Err(e) => eprintln!("[Client] Warning: Failed to patch IDE language_server: {}", e),
+    }
+
+    if files_patched {
+        #[cfg(target_os = "windows")]
+        {
+            eprintln!("[Client] Files were modified. Waiting 1.5 seconds for Windows Defender / OS to release file locks before launching IDE...");
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        }
     }
 
     // 6c. Bypass macOS signature protection if running on macOS
@@ -1047,8 +1058,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
-            eprintln!("[Client] Application startup. (Cleanup bypassed to preserve settings)");
-            // restore_original_state_all();
+            eprintln!("[Client] Application startup. Running cleanup to ensure clean state...");
+            restore_original_state_all();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1062,8 +1073,8 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::Exit = event {
-                eprintln!("[Client] Tauri application is exiting. (Cleanup bypassed to preserve settings)");
-                // restore_original_state_all();
+                eprintln!("[Client] Tauri application is exiting. Running final cleanup...");
+                restore_original_state_all();
             }
         });
 }

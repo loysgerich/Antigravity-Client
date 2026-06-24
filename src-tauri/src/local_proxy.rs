@@ -330,12 +330,20 @@ async fn proxy_request(
         .header("Access-Control-Allow-Origin", &cors_origin);
 
     // Copy response headers
+    let is_streaming_endpoint = path.contains("loadCodeAssist") || path.contains("chat");
+
     for (name, value) in response.headers() {
         let name_lower = name.as_str().to_lowercase();
-        // Skip hop-by-hop and length-related headers because we reconstruct a Stream body
-        if name_lower == "transfer-encoding" || name_lower == "content-length" || name_lower == "connection" {
+        // Skip hop-by-hop headers
+        if name_lower == "transfer-encoding" || name_lower == "connection" {
             continue;
         }
+        // If we are streaming, skip content-length so hyper will use chunked encoding.
+        // If we are buffering, we will calculate exact content-length later, so skip it here too.
+        if name_lower == "content-length" {
+            continue;
+        }
+
         if let Ok(header_name) = hyper::header::HeaderName::from_bytes(name.as_str().as_bytes()) {
             if let Ok(header_value) = hyper::header::HeaderValue::from_bytes(value.as_bytes()) {
                 builder = builder.header(header_name, header_value);
@@ -343,19 +351,38 @@ async fn proxy_request(
         }
     }
 
-    // Convert reqwest body to a Stream of hyper Frames
-    let stream = response.bytes_stream()
-        .map_ok(Frame::data)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
-    let body = StreamBody::new(stream).boxed();
+    if is_streaming_endpoint {
+        // Convert reqwest body to a Stream of hyper Frames
+        let stream = response.bytes_stream()
+            .map_ok(Frame::data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let body = StreamBody::new(stream).boxed();
 
+        let resp = builder
+            .body(body)
+            .unwrap_or_else(|_| {
+                hyper::Response::new(full_box(bytes::Bytes::from("Internal error")))
+            });
 
+        Ok(resp)
+    } else {
+        // Buffer the full response body
+        let resp_bytes = match response.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[LocalProxy] Failed to read response: {}", e);
+                bytes::Bytes::from(format!("Failed to read response: {}", e))
+            }
+        };
 
-    let resp = builder
-        .body(body)
-        .unwrap_or_else(|_| {
-            hyper::Response::new(full_box(bytes::Bytes::from("Internal error")))
-        });
+        builder = builder.header("Content-Length", resp_bytes.len().to_string());
 
-    Ok(resp)
+        let resp = builder
+            .body(full_box(resp_bytes))
+            .unwrap_or_else(|_| {
+                hyper::Response::new(full_box(bytes::Bytes::from("Internal error")))
+            });
+
+        Ok(resp)
+    }
 }
