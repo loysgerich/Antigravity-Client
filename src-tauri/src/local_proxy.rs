@@ -349,10 +349,6 @@ async fn proxy_request(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
     let body = StreamBody::new(stream).boxed();
 
-    if path.contains("fetchUserInfo") && status.is_success() {
-        eprintln!("[LocalProxy] fetchUserInfo response body: {}", String::from_utf8_lossy(&resp_bytes));
-    }
-
     let resp = builder
         .body(body)
         .unwrap_or_else(|_| {
