@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { 
   Shield, Zap, ExternalLink, RefreshCw, LogIn, Key, 
   Server, CheckCircle, XCircle, Cpu, Globe, Settings,
-  ChevronDown, Wifi, WifiOff, LogOut
+  Wifi, WifiOff, LogOut
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────
