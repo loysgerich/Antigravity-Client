@@ -29,8 +29,38 @@ async fn tunnel_loop(server_url: String, token: String) {
                 eprintln!("[Tunnel] Connected to Manager WebSocket");
                 let (mut write, mut read) = ws_stream.split();
 
-                // Wait for CONNECT command
-                if let Some(Ok(Message::Text(cmd))) = read.next().await {
+                // Wait for CONNECT command with keepalive ping
+                let mut command_received = None;
+                loop {
+                    tokio::select! {
+                        msg = read.next() => {
+                            match msg {
+                                Some(Ok(Message::Text(cmd))) => {
+                                    if cmd.starts_with("CONNECT ") {
+                                        command_received = Some(cmd);
+                                        break;
+                                    }
+                                }
+                                Some(Ok(Message::Ping(_))) => {
+                                    let _ = write.send(Message::Pong(vec![].into())).await;
+                                }
+                                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
+                                    eprintln!("[Tunnel] Connection closed or error");
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
+                            if write.send(Message::Ping(vec![].into())).await.is_err() {
+                                eprintln!("[Tunnel] Ping failed, connection dead");
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(cmd) = command_received {
                     let cmd_str = cmd.as_str();
                     if cmd_str.starts_with("CONNECT ") {
                         let parts: Vec<&str> = cmd_str.split_whitespace().collect();
