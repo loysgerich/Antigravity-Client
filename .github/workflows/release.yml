@@ -100,5 +100,4 @@ jobs:
           prerelease: false
           owner: loysgerich
           repo: Antigravity-IDE-Client
-          commitish: master
           args: --target ${{ matrix.target }}
