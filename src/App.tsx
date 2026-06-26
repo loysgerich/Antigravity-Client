@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { 
   Shield, Zap, ExternalLink, RefreshCw, LogIn, Key, 
   Server, CheckCircle, XCircle, Cpu, Globe, Settings,
@@ -121,7 +122,9 @@ const dict = {
     updateBtn: "Update Now",
     upToDate: "You have the latest version",
     updateError: "Failed to check or install update",
-    updating: "Updating..."
+    updating: "Updating...",
+    activeProxy: "Active",
+    secureProxy: "Secure proxy via port 8047"
   },
   ru: {
     secureClient: "Безопасный прокси-клиент",
@@ -173,7 +176,9 @@ const dict = {
     updateBtn: "Обновить сейчас",
     upToDate: "Установлена последняя версия",
     updateError: "Не удалось проверить или установить обновление",
-    updating: "Обновление..."
+    updating: "Обновление...",
+    activeProxy: "Активен",
+    secureProxy: "Защищенный прокси на порту 8047"
   }
 };
 
@@ -194,11 +199,8 @@ const MODEL_CATEGORIES: Record<string, { label: string; color: string; icon: str
 };
 
 const IDE_ALLOWED_MODELS = [
-  'gemini-3.5-flash-medium',
   'gemini-3.5-flash-high',
-  'gemini-3.5-flash-low',
   'gemini-3.1-pro-high',
-  'gemini-3.1-pro-low',
   'claude-sonnet-4-6-thinking',
   'claude-opus-4-6-thinking',
   'gpt-oss-120b-medium'
@@ -280,6 +282,8 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+
 
   const [token, setToken] = useState('');
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
@@ -956,95 +960,168 @@ export default function App() {
         )}
 
         {/* ─── Main Grid ───────────────────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
 
           {/* Connection Status Card */}
-          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6 relative overflow-hidden group">
+          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-4 relative overflow-hidden group">
             <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-emerald-500/10 blur-[50px] group-hover:bg-emerald-500/20 transition-all" />
-            <div className="flex items-center space-x-3 mb-3">
+            <div className="flex items-center space-x-3 mb-2">
               <div className="p-2 bg-emerald-500/20 rounded-lg border border-emerald-500/30">
-                <Wifi className="w-4 h-4 text-emerald-400" />
+                <Wifi className="w-5 h-5 text-emerald-400" />
               </div>
-              <h3 className="text-sm font-medium text-gray-300">{t.status}</h3>
+              <h3 className="text-base font-medium text-gray-300">{t.status}</h3>
             </div>
-            <div className="text-2xl font-bold text-emerald-400 mb-1">{t.active}</div>
-            <div className="flex flex-col text-xs text-gray-500 space-y-0.5">
+            <div className="text-3xl font-bold text-emerald-400 mb-1">{t.active}</div>
+            <div className="flex items-center text-xs text-gray-500 space-x-2 truncate">
               {tier !== null && tier > 0 && (
-                <span className="font-semibold text-gray-300">
-                  {t.plan} X{tier}
-                </span>
+                <>
+                  <span className="font-semibold text-gray-300">
+                    {t.plan} X{tier}
+                  </span>
+                  <span className="w-1 h-1 rounded-full bg-gray-600" />
+                </>
               )}
-              <span>
+              <span className="truncate">
                 {expiresAt ? `${getRemainingDays(expiresAt)} ${t.daysLeft}` : t.tokenAuth}
               </span>
             </div>
           </div>
 
           {/* Models Count Card */}
-          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6 relative overflow-hidden group">
+          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-4 relative overflow-hidden group">
             <div className="absolute -top-10 -left-10 w-32 h-32 bg-blue-500/10 blur-[50px] group-hover:bg-blue-500/20 transition-all" />
-            <div className="flex items-center space-x-3 mb-3">
+            <div className="flex items-center space-x-3 mb-2">
               <div className="p-2 bg-blue-500/20 rounded-lg border border-blue-500/30">
-                <Cpu className="w-4 h-4 text-blue-400" />
+                <Cpu className="w-5 h-5 text-blue-400" />
               </div>
-              <h3 className="text-sm font-medium text-gray-300">{t.models}</h3>
+              <h3 className="text-base font-medium text-gray-300">{t.models}</h3>
             </div>
-            <div className="text-2xl font-bold text-white mb-1">{models.length}</div>
-            <div className="text-xs text-gray-500">{t.availModels}</div>
+            <div className="text-3xl font-bold text-white mb-1">{models.length}</div>
+            <div className="text-xs text-gray-500 truncate">{t.availModels}</div>
           </div>
 
-          {/* Credits Card */}
-          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6 relative overflow-hidden group flex flex-col justify-between">
-            <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-amber-500/10 blur-[50px] group-hover:bg-amber-500/20 transition-all" />
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/30">
-                    <Zap className="w-4 h-4 text-amber-400" />
-                  </div>
-                  <h3 className="text-sm font-medium text-gray-300">{t.credits}</h3>
-                </div>
-                <div className="flex items-center">
-                  <label className="relative inline-flex items-center cursor-pointer" title="Enable Credit Overages">
-                    <input type="checkbox" className="sr-only peer" checked={creditOverages} onChange={toggleCreditOverages} />
-                    <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
-                  </label>
-                </div>
-              </div>
-              <div className="text-2xl font-bold text-amber-400 mb-1">{totalCredits !== null ? totalCredits : '-'}</div>
-              <div className="text-xs text-gray-500">{t.totalCredits}</div>
-            </div>
-          </div>
 
           {/* Server Card */}
-          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6 relative overflow-hidden group">
+          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-4 relative overflow-hidden group">
             <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-500/10 blur-[50px] group-hover:bg-purple-500/20 transition-all" />
-            <div className="flex items-center space-x-3 mb-3">
+            <div className="flex items-center space-x-3 mb-2">
               <div className="p-2 bg-purple-500/20 rounded-lg border border-purple-500/30">
-                <Server className="w-4 h-4 text-purple-400" />
+                <Server className="w-5 h-5 text-purple-400" />
               </div>
-              <h3 className="text-sm font-medium text-gray-300">{t.server}</h3>
+              <h3 className="text-base font-medium text-gray-300">{t.server}</h3>
             </div>
-            <div className={`text-2xl font-bold mb-1 ${
+            <div className={`text-3xl font-bold mb-1 ${
               ping === null ? 'text-red-400' :
               ping < 50 ? 'text-emerald-400' :
               ping < 150 ? 'text-amber-400' : 'text-rose-400'
             }`}>
               {ping !== null ? `${ping} ms` : 'Offline'}
             </div>
-            <div className="text-xs text-gray-500">{t.proxyPing}</div>
+            <div className="text-xs text-gray-500 truncate">{t.proxyPing}</div>
+          </div>
+        </div>
+
+        {/* ─── Connect to IDE (Premium Banner) ──────────────────────────────────── */}
+        <div className="relative mb-6 group">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 via-purple-600/20 to-blue-600/20 blur-xl rounded-2xl opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
+          <div className="relative backdrop-blur-xl bg-black/40 border border-white/10 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-center justify-between shadow-2xl">
+            
+            {/* Left: Icon & Text */}
+            <div className="flex items-center space-x-4 mb-4 md:mb-0 w-full md:w-auto">
+              <div className="relative shrink-0">
+                <div className="absolute inset-0 bg-blue-500/30 blur-md rounded-full" />
+                <div className="w-12 h-12 bg-white/5 border border-white/10 rounded-full flex items-center justify-center relative z-10">
+                  <Shield className="w-6 h-6 text-blue-400" />
+                </div>
+              </div>
+              <div className="flex flex-col">
+                <h2 className="text-lg font-bold text-white tracking-wide">{t.ready}</h2>
+                <p className="text-xs text-gray-400">{t.secureProxy}</p>
+              </div>
+            </div>
+
+            {/* Right: Controls & Action */}
+            <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4 w-full md:w-auto">
+              
+              {/* IDE Toggle */}
+              <div className="flex p-1 bg-black/60 rounded-xl border border-white/5">
+                <button
+                  onClick={() => {
+                    setIdeType('Antigravity IDE');
+                    localStorage.setItem(LS_IDE_TYPE_KEY, 'Antigravity IDE');
+                  }}
+                  className={`px-6 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    ideType === 'Antigravity IDE' 
+                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 shadow-lg' 
+                      : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  IDE
+                </button>
+                <button
+                  onClick={() => {
+                    setIdeType('Antigravity 2.0');
+                    localStorage.setItem(LS_IDE_TYPE_KEY, 'Antigravity 2.0');
+                  }}
+                  className={`px-6 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    ideType === 'Antigravity 2.0' 
+                      ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30 shadow-lg' 
+                      : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  v2.0
+                </button>
+              </div>
+
+              {/* Status / Connect Button */}
+              {proxyRunning ? (
+                <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-1.5 text-emerald-400 bg-emerald-400/10 px-3 py-2 rounded-xl border border-emerald-400/20" title="Proxy Running">
+                    <Activity className="w-3.5 h-3.5 animate-pulse" />
+                    <span className="text-xs font-bold uppercase tracking-wider">{t.activeProxy}</span>
+                  </div>
+                  {ideSuccess && (
+                    <div className="text-emerald-400 bg-emerald-400/10 p-2 rounded-xl border border-emerald-400/20" title="IDE Launched Successfully">
+                      <CheckCircle className="w-4 h-4" />
+                    </div>
+                  )}
+                  <button
+                    onClick={handleStopProxy}
+                    className="flex items-center justify-center p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-400/20 transition-colors"
+                    title="Stop Proxy"
+                  >
+                    <Square className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleConnect}
+                  disabled={ideConnecting}
+                  className="relative px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold rounded-xl text-sm transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)] flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {ideConnecting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <span>{t.connectTo}</span>
+                      <ExternalLink className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* ─── Models List ─────────────────────────────────────── */}
         {models.length > 0 && (
-          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-6 mb-6">
+          <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-5 mb-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-3">
                 <div className="p-2 bg-blue-500/20 rounded-lg border border-blue-500/30">
-                  <Zap className="w-4 h-4 text-blue-400" />
+                  <Zap className="w-5 h-5 text-blue-400" />
                 </div>
-                <h3 className="text-base font-semibold text-gray-200">{t.availableModelsTitle}</h3>
+                <h3 className="text-lg font-bold text-gray-200">{t.availableModelsTitle}</h3>
               </div>
               <div className="flex items-center space-x-3">
                 <span className="text-xs text-gray-500">{models.length} {t.modelsCount}</span>
@@ -1058,58 +1135,43 @@ export default function App() {
               </div>
             </div>
 
-            <div className="space-y-3">
-              {Object.entries(groupedModels).map(([category, categoryModels]) => {
-                const catInfo = Object.values(MODEL_CATEGORIES).find(c => c.label === category)
-                  || { label: category, color: 'from-purple-500 to-pink-400', icon: '◇' };
-                
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {models.map(model => {
+                const catInfo = getModelCategory(model.id);
+                const pct = modelPercentages[model.id] 
+                  ?? modelPercentages[model.id.replace('-thinking', '')]
+                  ?? modelPercentages[model.id.replace(/-high|-medium|-low/g, '')]
+                  ?? modelPercentages[model.id.replace(/-high|-medium/g, '-low')];
+                const resetTime = modelResets[model.id]
+                  ?? modelResets[model.id.replace('-thinking', '')]
+                  ?? modelResets[model.id.replace(/-high|-medium|-low/g, '')]
+                  ?? modelResets[model.id.replace(/-high|-medium/g, '-low')];
                 return (
-                  <div key={category}>
-                    <div className="flex items-center space-x-2 mb-2">
-                      <span className="text-sm">{catInfo.icon}</span>
-                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{category}</span>
-                      <span className="text-xs text-gray-600">({categoryModels.length})</span>
+                  <div
+                    key={model.id}
+                    className="flex flex-col space-y-2 px-4 py-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl transition-colors group/model"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${catInfo.color} flex-shrink-0`} />
+                        <span className="text-sm text-gray-300 truncate group-hover/model:text-white transition-colors" title={model.id}>
+                          {formatModelName(model.id)}
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-1.5">
+                        {pct !== undefined && pct < 100 && resetTime && (
+                          <CountdownTimer resetTime={resetTime} />
+                        )}
+                        {pct !== undefined && (
+                          <span className="text-[10px] text-gray-500 font-mono">{pct}%</span>
+                        )}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {categoryModels.map(model => {
-                        const pct = modelPercentages[model.id] 
-                          ?? modelPercentages[model.id.replace('-thinking', '')]
-                          ?? modelPercentages[model.id.replace(/-high|-medium|-low/g, '')]
-                          ?? modelPercentages[model.id.replace(/-high|-medium/g, '-low')];
-                        const resetTime = modelResets[model.id]
-                          ?? modelResets[model.id.replace('-thinking', '')]
-                          ?? modelResets[model.id.replace(/-high|-medium|-low/g, '')]
-                          ?? modelResets[model.id.replace(/-high|-medium/g, '-low')];
-                        return (
-                          <div
-                            key={model.id}
-                            className="flex flex-col space-y-1.5 px-3 py-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl transition-colors group/model"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-3">
-                                <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${catInfo.color} flex-shrink-0`} />
-                                <span className="text-sm text-gray-300 truncate group-hover/model:text-white transition-colors" title={model.id}>
-                                  {formatModelName(model.id)}
-                                </span>
-                              </div>
-                              <div className="flex items-center space-x-1.5">
-                                {pct !== undefined && pct < 100 && resetTime && (
-                                  <CountdownTimer resetTime={resetTime} />
-                                )}
-                                {pct !== undefined && (
-                                  <span className="text-[10px] text-gray-500 font-mono">{pct}%</span>
-                                )}
-                              </div>
-                            </div>
-                            {pct !== undefined && (
-                              <div className="w-full bg-white/10 rounded-full h-1 mt-1 overflow-hidden">
-                                <div className={`h-1 rounded-full bg-gradient-to-r ${catInfo.color}`} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}></div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    {pct !== undefined && (
+                      <div className="w-full bg-white/10 rounded-full h-1 mt-1 overflow-hidden">
+                        <div className={`h-1 rounded-full bg-gradient-to-r ${catInfo.color}`} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}></div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1117,86 +1179,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ─── Connect to IDE ──────────────────────────────────── */}
-        <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500/20 to-purple-600/20 rounded-full flex items-center justify-center mb-6 border border-white/10">
-            <Shield className="w-8 h-8 text-blue-400" />
-          </div>
-          <h2 className="text-2xl font-bold text-white mb-2">{t.ready}</h2>
-          <p className="text-gray-400 max-w-lg mb-8">
-            Connect to Antigravity IDE with your secure proxy token. A local proxy on port 8047 will route all IDE requests through the Manager.
-          </p>
 
-          {/* Proxy Status Badge */}
-          {proxyRunning && (
-            <div className="mb-6 flex items-center space-x-3">
-              <div className="flex items-center space-x-2 text-emerald-400 bg-emerald-400/10 px-4 py-3 rounded-xl border border-emerald-400/20">
-                <Activity className="w-4 h-4 animate-pulse" />
-                <span className="text-sm font-medium">{t.localProxy} :8047</span>
-              </div>
-              <button
-                onClick={handleStopProxy}
-                className="flex items-center space-x-1 px-3 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-400/20 transition-colors text-sm"
-              >
-                <Square className="w-3 h-3" />
-                <span>{t.stop}</span>
-              </button>
-            </div>
-          )}
-
-          {ideSuccess && (
-            <div className="mb-6 flex items-center space-x-2 text-emerald-400 bg-emerald-400/10 px-4 py-3 rounded-xl border border-emerald-400/20">
-              <CheckCircle className="w-5 h-5" />
-              <span className="text-sm font-medium">{t.ideLaunched}</span>
-            </div>
-          )}
-
-          {/* IDE Selection */}
-          <div className="flex space-x-2 bg-black/40 p-1.5 rounded-xl border border-white/10 mb-6">
-            <button
-              onClick={() => {
-                setIdeType('Antigravity IDE');
-                localStorage.setItem(LS_IDE_TYPE_KEY, 'Antigravity IDE');
-              }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                ideType === 'Antigravity IDE' 
-                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
-                  : 'text-gray-400 hover:text-gray-200 border border-transparent'
-              }`}
-            >
-              Antigravity IDE
-            </button>
-            <button
-              onClick={() => {
-                setIdeType('Antigravity 2.0');
-                localStorage.setItem(LS_IDE_TYPE_KEY, 'Antigravity 2.0');
-              }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                ideType === 'Antigravity 2.0' 
-                  ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' 
-                  : 'text-gray-400 hover:text-gray-200 border border-transparent'
-              }`}
-            >
-              Antigravity 2.0
-            </button>
-          </div>
-
-          <button
-            onClick={handleConnect}
-            disabled={ideConnecting}
-            className="group relative px-8 py-4 bg-white text-black font-semibold rounded-2xl text-lg hover:scale-105 transition-all duration-300 shadow-[0_0_40px_rgba(255,255,255,0.3)] hover:shadow-[0_0_60px_rgba(255,255,255,0.5)] flex items-center space-x-3 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-black/5 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
-            {ideConnecting ? (
-              <RefreshCw className="w-5 h-5 animate-spin" />
-            ) : (
-              <>
-                <span>{proxyRunning ? t.reconnect : `${t.connectTo} ${ideType}`}</span>
-                <ExternalLink className="w-5 h-5" />
-              </>
-            )}
-          </button>
-        </div>
       </div>
 
       {/* ─── Settings Modal ──────────────────────────────────── */}
