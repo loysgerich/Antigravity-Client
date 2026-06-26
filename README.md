@@ -1,4 +1,4 @@
-# Antigravity Client (v1.0.18)
+# Antigravity Client (v1.0.19)
 
 GUI-клиент и локальный прокси-сервер для интеграции и перенаправления запросов авторизации/API из **Antigravity 2.0** и **Antigravity IDE** на менеджер пула аккаунтов.
 
