@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+// import { getCurrentWindow } from '@tauri-apps/api/window';
 import { 
   Shield, Zap, ExternalLink, RefreshCw, LogIn, Key, 
   Server, CheckCircle, XCircle, Cpu, Globe, Settings,
@@ -298,7 +298,7 @@ export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelPercentages, setModelPercentages] = useState<Record<string, number>>({});
   const [modelResets, setModelResets] = useState<Record<string, string>>({});
-  const [totalCredits, setTotalCredits] = useState<number | null>(null);
+  const [_totalCredits, setTotalCredits] = useState<number | null>(null);
   const [creditOverages, setCreditOverages] = useState(false);
   const [connected, setConnected] = useState(false);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
@@ -619,6 +619,7 @@ export default function App() {
     }
   };
 
+  // @ts-ignore - function unused in new UI but kept for API completeness
   const toggleCreditOverages = async () => {
     try {
       const newState = !creditOverages;
