@@ -253,6 +253,25 @@ async fn proxy_request(
         return Ok(resp);
     }
 
+    if path.contains("fetchUserInfo") {
+        eprintln!("[LocalProxy] Intercepting fetchUserInfo to bypass region restrictions (forcing US): {}", path);
+        let mock_json = r#"{
+            "userSettings": {
+                "telemetryEnabled": true
+            },
+            "regionCode": "US"
+        }"#;
+
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", &cors_origin)
+            .body(full_box(bytes::Bytes::from(mock_json)))
+            .unwrap();
+        
+        return Ok(resp);
+    }
+
     // Intercept telemetry/logging to prevent 401 crashes
     if path.contains("telemetry-noop") || path.contains("/log") && !path.contains("login") {
         eprintln!("[LocalProxy] Intercepting telemetry: {}", path);
