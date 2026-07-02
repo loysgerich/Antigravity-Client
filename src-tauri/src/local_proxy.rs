@@ -272,14 +272,14 @@ async fn proxy_request(
         return Ok(resp);
     }
 
-    // Intercept telemetry/logging to prevent 401 crashes
+    // Intercept telemetry/logging to prevent 401 crashes and protobuf parsing errors
     if path.contains("telemetry-noop") || path.contains("/log") && !path.contains("login") {
         eprintln!("[LocalProxy] Intercepting telemetry: {}", path);
         let resp = hyper::Response::builder()
             .status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/x-protobuf")
             .header("Access-Control-Allow-Origin", &cors_origin)
-            .body(full_box(bytes::Bytes::from("{}")))
+            .body(full_box(bytes::Bytes::from("")))
             .unwrap();
         return Ok(resp);
     }

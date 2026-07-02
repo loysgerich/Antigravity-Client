@@ -35,15 +35,15 @@ fi
 git add .gitignore package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/src/lib.rs src-tauri/src/local_proxy.rs system_architecture_and_proxy_prompt.md README.md push_to_github.sh
 
 # Commit
-git commit -m "Release v1.0.11: Patch macOS permissions, self-killing fix, optimized search and Antigravity IDE support"
+git commit -m "Release v1.0.22: Fix telemetry log response wire-format parsing error"
 
 # Push
 git push origin HEAD:$BRANCH
 
 # Tag & Release
-git tag -d v1.0.11 2>/dev/null || true
-git push origin :refs/tags/v1.0.11 2>/dev/null || true
-git tag -a v1.0.11 -m "Release v1.0.11"
-git push origin v1.0.11
+git tag -d v1.0.22 2>/dev/null || true
+git push origin :refs/tags/v1.0.22 2>/dev/null || true
+git tag -a v1.0.22 -m "Release v1.0.22"
+git push origin v1.0.22
 
-echo "=== Release v1.0.11 successfully pushed to GitHub! ==="
+echo "=== Release v1.0.22 successfully pushed to GitHub! ==="
