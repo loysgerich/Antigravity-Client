@@ -185,8 +185,10 @@ const dict = {
 const LS_TOKEN_KEY = 'ag_token';
 const LS_SERVER_KEY = 'ag_server_url';
 const LS_IDE_TYPE_KEY = 'ag_ide_type';
-const LS_CUSTOM_EXE_KEY = 'ag_custom_exe';
-const LS_CUSTOM_DB_KEY = 'ag_custom_db';
+const LS_CUSTOM_EXE_IDE_KEY = 'ag_custom_exe_ide';
+const LS_CUSTOM_DB_IDE_KEY = 'ag_custom_db_ide';
+const LS_CUSTOM_EXE_V2_KEY = 'ag_custom_exe_v2';
+const LS_CUSTOM_DB_V2_KEY = 'ag_custom_db_v2';
 
 const DEFAULT_SERVER_URL = 'http://45.128.204.95';
 
@@ -291,8 +293,10 @@ export default function App() {
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
   const [ideType, setIdeType] = useState('Antigravity IDE');
-  const [customExePath, setCustomExePath] = useState('');
-  const [customDbPath, setCustomDbPath] = useState('');
+  const [customExePathIde, setCustomExePathIde] = useState('');
+  const [customDbPathIde, setCustomDbPathIde] = useState('');
+  const [customExePathV2, setCustomExePathV2] = useState('');
+  const [customDbPathV2, setCustomDbPathV2] = useState('');
 
   // Main App State
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -384,13 +388,20 @@ export default function App() {
     const savedToken = localStorage.getItem(LS_TOKEN_KEY);
     const savedServer = localStorage.getItem(LS_SERVER_KEY);
     const savedIdeType = localStorage.getItem(LS_IDE_TYPE_KEY);
-    const savedExePath = localStorage.getItem(LS_CUSTOM_EXE_KEY);
-    const savedDbPath = localStorage.getItem(LS_CUSTOM_DB_KEY);
+    const savedExePathLegacy = localStorage.getItem('ag_custom_exe') || '';
+    const savedDbPathLegacy = localStorage.getItem('ag_custom_db') || '';
+
+    const savedExePathIde = localStorage.getItem(LS_CUSTOM_EXE_IDE_KEY) || (savedIdeType === 'Antigravity IDE' ? savedExePathLegacy : '') || '';
+    const savedDbPathIde = localStorage.getItem(LS_CUSTOM_DB_IDE_KEY) || (savedIdeType === 'Antigravity IDE' ? savedDbPathLegacy : '') || '';
+    const savedExePathV2 = localStorage.getItem(LS_CUSTOM_EXE_V2_KEY) || (savedIdeType === 'Antigravity 2.0' ? savedExePathLegacy : '') || '';
+    const savedDbPathV2 = localStorage.getItem(LS_CUSTOM_DB_V2_KEY) || (savedIdeType === 'Antigravity 2.0' ? savedDbPathLegacy : '') || '';
 
     if (savedServer) setServerUrl(savedServer);
     if (savedIdeType) setIdeType(savedIdeType);
-    if (savedExePath) setCustomExePath(savedExePath);
-    if (savedDbPath) setCustomDbPath(savedDbPath);
+    setCustomExePathIde(savedExePathIde);
+    setCustomDbPathIde(savedDbPathIde);
+    setCustomExePathV2(savedExePathV2);
+    setCustomDbPathV2(savedDbPathV2);
     
     const url = savedServer || DEFAULT_SERVER_URL;
     
@@ -533,13 +544,15 @@ export default function App() {
   const handleConnect = async () => {
     setIdeConnecting(true);
     setIdeSuccess(false);
+    const exePath = ideType === 'Antigravity 2.0' ? customExePathV2 : customExePathIde;
+    const dbPath = ideType === 'Antigravity 2.0' ? customDbPathV2 : customDbPathIde;
     try {
       await invoke('inject_token_and_start_ide', {
         token: token,
         proxyUrl: `${serverUrl}/v1`,
         ideType: ideType,
-        customExePath: customExePath || null,
-        customDbPath: customDbPath || null,
+        customExePath: exePath || null,
+        customDbPath: dbPath || null,
       });
       setIdeSuccess(true);
       setProxyRunning(true);
@@ -610,8 +623,10 @@ export default function App() {
   const handleSaveServerUrl = () => {
     localStorage.setItem(LS_SERVER_KEY, serverUrl);
     localStorage.setItem(LS_IDE_TYPE_KEY, ideType);
-    localStorage.setItem(LS_CUSTOM_EXE_KEY, customExePath);
-    localStorage.setItem(LS_CUSTOM_DB_KEY, customDbPath);
+    localStorage.setItem(LS_CUSTOM_EXE_IDE_KEY, customExePathIde);
+    localStorage.setItem(LS_CUSTOM_DB_IDE_KEY, customDbPathIde);
+    localStorage.setItem(LS_CUSTOM_EXE_V2_KEY, customExePathV2);
+    localStorage.setItem(LS_CUSTOM_DB_V2_KEY, customDbPathV2);
     setShowSettings(false);
     checkServerHealth(serverUrl);
     if (token && connected) {
@@ -1200,39 +1215,125 @@ export default function App() {
               </button>
             </div>
             
-            <div className="p-6 space-y-6 overflow-y-auto">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-300 block">
-                  Custom Executable Path (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder={`e.g. C:\\Apps\\${ideType}\\Antigravity.exe`}
-                  value={customExePath}
-                  onChange={(e) => {
-                    setCustomExePath(e.target.value);
-                    localStorage.setItem(LS_CUSTOM_EXE_KEY, e.target.value);
-                  }}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
-                />
-                <p className="text-xs text-gray-500">{t.leaveBlank}</p>
+            <div className="p-6 space-y-6 overflow-y-auto max-h-[60vh]">
+              {/* --- Antigravity IDE Settings --- */}
+              <div className="space-y-4 border-b border-white/5 pb-4">
+                <h3 className="text-sm font-bold text-blue-400 flex items-center space-x-2">
+                  <span>Antigravity IDE (Legacy)</span>
+                </h3>
+                
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-gray-300 block">
+                    Custom Executable Path (Optional)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. C:\Apps\Antigravity IDE\Antigravity IDE.exe"
+                      value={customExePathIde}
+                      onChange={(e) => {
+                        setCustomExePathIde(e.target.value);
+                        localStorage.setItem(LS_CUSTOM_EXE_IDE_KEY, e.target.value);
+                      }}
+                      className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const selected = await invoke<string | null>('browse_executable');
+                          if (selected) {
+                            setCustomExePathIde(selected);
+                            localStorage.setItem(LS_CUSTOM_EXE_IDE_KEY, selected);
+                          }
+                        } catch (e) {
+                          console.error("Failed to browse: ", e);
+                        }
+                      }}
+                      className="px-4 py-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl text-sm font-medium border border-white/5 transition-colors whitespace-nowrap"
+                    >
+                      {lang === 'ru' ? 'Обзор...' : 'Browse...'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-500">{t.leaveBlank}</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-gray-300 block">
+                    Custom DB / AppData Path (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. C:\Data\User\globalStorage\state.vscdb"
+                    value={customDbPathIde}
+                    onChange={(e) => {
+                      setCustomDbPathIde(e.target.value);
+                      localStorage.setItem(LS_CUSTOM_DB_IDE_KEY, e.target.value);
+                    }}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
+                  />
+                  <p className="text-[11px] text-gray-500">{t.pathToVscdb}</p>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-300 block">
-                  Custom DB / AppData Path (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. C:\\Data\\User\\globalStorage\\state.vscdb"
-                  value={customDbPath}
-                  onChange={(e) => {
-                    setCustomDbPath(e.target.value);
-                    localStorage.setItem(LS_CUSTOM_DB_KEY, e.target.value);
-                  }}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-sm"
-                />
-                <p className="text-xs text-gray-500">{t.pathToVscdb}</p>
+              {/* --- Antigravity 2.0 Settings --- */}
+              <div className="space-y-4 pb-2">
+                <h3 className="text-sm font-bold text-purple-400 flex items-center space-x-2">
+                  <span>Antigravity 2.0</span>
+                </h3>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-gray-300 block">
+                    Custom Executable Path (Optional)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. C:\Apps\Antigravity\Antigravity.exe"
+                      value={customExePathV2}
+                      onChange={(e) => {
+                        setCustomExePathV2(e.target.value);
+                        localStorage.setItem(LS_CUSTOM_EXE_V2_KEY, e.target.value);
+                      }}
+                      className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const selected = await invoke<string | null>('browse_executable');
+                          if (selected) {
+                            setCustomExePathV2(selected);
+                            localStorage.setItem(LS_CUSTOM_EXE_V2_KEY, selected);
+                          }
+                        } catch (e) {
+                          console.error("Failed to browse: ", e);
+                        }
+                      }}
+                      className="px-4 py-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl text-sm font-medium border border-white/5 transition-colors whitespace-nowrap"
+                    >
+                      {lang === 'ru' ? 'Обзор...' : 'Browse...'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-500">{t.leaveBlank}</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-gray-300 block">
+                    Custom DB / AppData Path (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. C:\Data\User\globalStorage\state.vscdb"
+                    value={customDbPathV2}
+                    onChange={(e) => {
+                      setCustomDbPathV2(e.target.value);
+                      localStorage.setItem(LS_CUSTOM_DB_V2_KEY, e.target.value);
+                    }}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono text-sm"
+                  />
+                  <p className="text-[11px] text-gray-500">{t.pathToVscdb}</p>
+                </div>
               </div>
 
               <div className="border-t border-white/5 pt-6 space-y-4">

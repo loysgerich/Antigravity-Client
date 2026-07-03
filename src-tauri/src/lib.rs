@@ -679,7 +679,18 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
 
     if let Some(path) = custom_exe_path {
         if !path.is_empty() {
-            child_opt = std::process::Command::new(path).spawn().ok();
+            let p = std::path::Path::new(path);
+            if !p.exists() {
+                return Err(format!("Указанный исполняемый файл не найден по пути: {}", path));
+            }
+            match std::process::Command::new(path).spawn() {
+                Ok(child) => {
+                    child_opt = Some(child);
+                }
+                Err(e) => {
+                    return Err(format!("Не удалось запустить указанный файл: {}", e));
+                }
+            }
         }
     }
 
@@ -687,9 +698,19 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
         #[cfg(target_os = "macos")]
         {
             let app_path = get_app_bundle_path(ide_type, custom_exe_path);
-            child_opt = std::process::Command::new("open")
+            if !app_path.exists() {
+                return Err(format!("Приложение не найдено по стандартному пути: {:?}", app_path));
+            }
+            match std::process::Command::new("open")
                 .args(["-n", &app_path.to_string_lossy()])
-                .spawn().ok();
+                .spawn() {
+                Ok(child) => {
+                    child_opt = Some(child);
+                }
+                Err(e) => {
+                    return Err(format!("Не удалось запустить open для приложения: {}", e));
+                }
+            }
         }
         #[cfg(target_os = "windows")]
         {
@@ -700,7 +721,18 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 format!(r"{}\Programs\Antigravity IDE\Antigravity IDE.exe", appdata)
             };
             
-            child_opt = std::process::Command::new(path).spawn().ok();
+            let p = std::path::Path::new(&path);
+            if !p.exists() {
+                return Err(format!("Файл запуска не найден по стандартному пути: {}", path));
+            }
+            match std::process::Command::new(path).spawn() {
+                Ok(child) => {
+                    child_opt = Some(child);
+                }
+                Err(e) => {
+                    return Err(format!("Не удалось запустить стандартный файл: {}", e));
+                }
+            }
         }
         #[cfg(target_os = "linux")]
         {
@@ -715,10 +747,22 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
             } else { 
                 "/home/yaaaa/projects/Antigravity IDE Linux/antigravity-ide" 
             };
-            child_opt = std::process::Command::new(bin_name)
+            
+            let p = std::path::Path::new(bin_name);
+            if !p.exists() {
+                return Err(format!("Стандартный исполняемый файл Linux не найден: {}", bin_name));
+            }
+            match std::process::Command::new(bin_name)
                 .env("DONT_PROMPT_WSL_INSTALL", "1")
                 .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
-                .spawn().ok();
+                .spawn() {
+                Ok(child) => {
+                    child_opt = Some(child);
+                }
+                Err(e) => {
+                    return Err(format!("Не удалось запустить Linux IDE: {}", e));
+                }
+            }
         }
     }
 
@@ -1061,6 +1105,64 @@ async fn request_server(
     }
 }
 
+#[tauri::command]
+async fn browse_executable() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let ps_script = r#"
+            Add-Type -AssemblyName System.Windows.Forms
+            $f = New-Object System.Windows.Forms.OpenFileDialog
+            $f.Filter = "Executable Files (*.exe)|*.exe|All Files (*.*)|*.*"
+            $f.Title = "Select Antigravity Executable"
+            $f.ShowHelp = $true
+            if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                Write-Output $f.FileName
+            }
+        "#;
+
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+            .output()
+            .map_err(|e| format!("Failed to run file dialog: {}", e))?;
+
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if path_str.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(path_str))
+            }
+        } else {
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(format!("File dialog error: {}", err))
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("osascript")
+            .args(["-e", "POSIX path of (choose file with prompt \"Select Antigravity Executable\")"])
+            .output()
+            .map_err(|e| format!("Failed to run file dialog: {}", e))?;
+
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if path_str.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(path_str))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Err("File dialog is only supported on Windows and macOS".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1075,7 +1177,8 @@ pub fn run() {
             stop_proxy,
             get_proxy_status,
             install_client_update,
-            request_server
+            request_server,
+            browse_executable
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
