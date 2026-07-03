@@ -189,6 +189,7 @@ const LS_CUSTOM_EXE_IDE_KEY = 'ag_custom_exe_ide';
 const LS_CUSTOM_DB_IDE_KEY = 'ag_custom_db_ide';
 const LS_CUSTOM_EXE_V2_KEY = 'ag_custom_exe_v2';
 const LS_CUSTOM_DB_V2_KEY = 'ag_custom_db_v2';
+const LS_CUSTOM_EXE_CLI_KEY = 'ag_custom_exe_cli';
 
 const DEFAULT_SERVER_URL = 'http://45.128.204.95';
 
@@ -297,6 +298,7 @@ export default function App() {
   const [customDbPathIde, setCustomDbPathIde] = useState('');
   const [customExePathV2, setCustomExePathV2] = useState('');
   const [customDbPathV2, setCustomDbPathV2] = useState('');
+  const [customExePathCli, setCustomExePathCli] = useState('');
 
   // Main App State
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -395,6 +397,7 @@ export default function App() {
     const savedDbPathIde = localStorage.getItem(LS_CUSTOM_DB_IDE_KEY) || (savedIdeType === 'Antigravity IDE' ? savedDbPathLegacy : '') || '';
     const savedExePathV2 = localStorage.getItem(LS_CUSTOM_EXE_V2_KEY) || (savedIdeType === 'Antigravity 2.0' ? savedExePathLegacy : '') || '';
     const savedDbPathV2 = localStorage.getItem(LS_CUSTOM_DB_V2_KEY) || (savedIdeType === 'Antigravity 2.0' ? savedDbPathLegacy : '') || '';
+    const savedExePathCli = localStorage.getItem(LS_CUSTOM_EXE_CLI_KEY) || '';
 
     if (savedServer) setServerUrl(savedServer);
     if (savedIdeType) setIdeType(savedIdeType);
@@ -402,6 +405,7 @@ export default function App() {
     setCustomDbPathIde(savedDbPathIde);
     setCustomExePathV2(savedExePathV2);
     setCustomDbPathV2(savedDbPathV2);
+    setCustomExePathCli(savedExePathCli);
     
     const url = savedServer || DEFAULT_SERVER_URL;
     
@@ -544,8 +548,10 @@ export default function App() {
   const handleConnect = async () => {
     setIdeConnecting(true);
     setIdeSuccess(false);
-    const exePath = ideType === 'Antigravity 2.0' ? customExePathV2 : customExePathIde;
-    const dbPath = ideType === 'Antigravity 2.0' ? customDbPathV2 : customDbPathIde;
+    const exePath = ideType === 'Antigravity 2.0' ? customExePathV2 : 
+                    ideType === 'Antigravity CLI' ? customExePathCli : customExePathIde;
+    const dbPath = ideType === 'Antigravity 2.0' ? customDbPathV2 : 
+                   ideType === 'Antigravity CLI' ? null : customDbPathIde;
     try {
       await invoke('inject_token_and_start_ide', {
         token: token,
@@ -1087,6 +1093,19 @@ export default function App() {
                 >
                   v2.0
                 </button>
+                <button
+                  onClick={() => {
+                    setIdeType('Antigravity CLI');
+                    localStorage.setItem(LS_IDE_TYPE_KEY, 'Antigravity CLI');
+                  }}
+                  className={`px-6 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    ideType === 'Antigravity CLI' 
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-lg' 
+                      : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  CLI
+                </button>
               </div>
 
               {/* Status / Connect Button */}
@@ -1333,6 +1352,49 @@ export default function App() {
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono text-sm"
                   />
                   <p className="text-[11px] text-gray-500">{t.pathToVscdb}</p>
+                </div>
+              </div>
+
+              {/* --- Antigravity CLI Settings --- */}
+              <div className="space-y-4 pb-2 border-t border-white/5 pt-4">
+                <h3 className="text-sm font-bold text-emerald-400 flex items-center space-x-2">
+                  <span>Antigravity CLI (agy)</span>
+                </h3>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-gray-300 block">
+                    Custom Executable Path (Optional)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={lang === 'ru' ? 'например, C:\\Users\\user\\AppData\\Local\\agy\\bin\\agy.exe' : 'e.g. C:\\Users\\user\\AppData\\Local\\agy\\bin\\agy.exe'}
+                      value={customExePathCli}
+                      onChange={(e) => {
+                        setCustomExePathCli(e.target.value);
+                        localStorage.setItem(LS_CUSTOM_EXE_CLI_KEY, e.target.value);
+                      }}
+                      className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const selected = await invoke<string | null>('browse_executable');
+                          if (selected) {
+                            setCustomExePathCli(selected);
+                            localStorage.setItem(LS_CUSTOM_EXE_CLI_KEY, selected);
+                          }
+                        } catch (e) {
+                          console.error("Failed to browse CLI: ", e);
+                        }
+                      }}
+                      className="px-4 py-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl text-sm font-medium border border-white/5 transition-colors whitespace-nowrap"
+                    >
+                      {lang === 'ru' ? 'Обзор...' : 'Browse...'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-500">{t.leaveBlank}</p>
                 </div>
               </div>
 

@@ -313,44 +313,45 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
             fn CredDeleteW(target_name: *const u16, type_: u32, flags: u32) -> i32;
         }
 
-        let target = "gemini:antigravity";
         let user = "antigravity";
         // Language server expects raw UTF-8 JSON string on Windows
         let secret_bytes = payload_json.as_bytes();
         let secret_size = secret_bytes.len() as u32;
         let secret_ptr = secret_bytes.as_ptr();
 
-        let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
         let user_wide: Vec<u16> = std::ffi::OsStr::new(user)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 
-        let cred = CREDENTIALW {
-            flags: 0,
-            cred_type: 1, // CRED_TYPE_GENERIC
-            target_name: target_wide.as_ptr(),
-            comment: ptr::null(),
-            last_written: FILETIME { dw_low_date_time: 0, dw_high_date_time: 0 },
-            credential_blob_size: secret_size,
-            credential_blob: secret_ptr,
-            persist: 2, // CRED_PERSIST_LOCAL_MACHINE
-            attribute_count: 0,
-            attributes: ptr::null(),
-            target_alias: ptr::null(),
-            user_name: user_wide.as_ptr(),
-        };
+        for target in &["gemini:antigravity", "gemini/antigravity"] {
+            let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
 
-        unsafe {
-            let _ = CredDeleteW(target_wide.as_ptr(), 1, 0);
-            let res = CredWriteW(&cred, 0);
-            if res == 0 {
-                let err = std::io::Error::last_os_error();
-                return Err(format!("Windows CredWriteW failed: {}", err));
+            let cred = CREDENTIALW {
+                flags: 0,
+                cred_type: 1, // CRED_TYPE_GENERIC
+                target_name: target_wide.as_ptr(),
+                comment: ptr::null(),
+                last_written: FILETIME { dw_low_date_time: 0, dw_high_date_time: 0 },
+                credential_blob_size: secret_size,
+                credential_blob: secret_ptr,
+                persist: 2, // CRED_PERSIST_LOCAL_MACHINE
+                attribute_count: 0,
+                attributes: ptr::null(),
+                target_alias: ptr::null(),
+                user_name: user_wide.as_ptr(),
+            };
+
+            unsafe {
+                let _ = CredDeleteW(target_wide.as_ptr(), 1, 0);
+                let res = CredWriteW(&cred, 0);
+                if res == 0 {
+                    let err = std::io::Error::last_os_error();
+                    return Err(format!("Windows CredWriteW failed for {}: {}", target, err));
+                }
             }
         }
     }
@@ -486,44 +487,45 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
             fn CredDeleteW(target_name: *const u16, type_: u32, flags: u32) -> i32;
         }
 
-        let target = "gemini:antigravity";
         let user = "antigravity";
         // Language server expects raw UTF-8 JSON string on Windows
         let secret_bytes = full_keyring_value.as_bytes();
         let secret_size = secret_bytes.len() as u32;
         let secret_ptr = secret_bytes.as_ptr();
 
-        let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
         let user_wide: Vec<u16> = std::ffi::OsStr::new(user)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 
-        let cred = CREDENTIALW {
-            flags: 0,
-            cred_type: 1, // CRED_TYPE_GENERIC
-            target_name: target_wide.as_ptr(),
-            comment: ptr::null(),
-            last_written: FILETIME { dw_low_date_time: 0, dw_high_date_time: 0 },
-            credential_blob_size: secret_size,
-            credential_blob: secret_ptr,
-            persist: 2, // CRED_PERSIST_LOCAL_MACHINE
-            attribute_count: 0,
-            attributes: ptr::null(),
-            target_alias: ptr::null(),
-            user_name: user_wide.as_ptr(),
-        };
+        for target in &["gemini:antigravity", "gemini/antigravity"] {
+            let target_wide: Vec<u16> = std::ffi::OsStr::new(target)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
 
-        unsafe {
-            let _ = CredDeleteW(target_wide.as_ptr(), 1, 0);
-            let res = CredWriteW(&cred, 0);
-            if res == 0 {
-                let err = std::io::Error::last_os_error();
-                return Err(format!("Windows CredWriteW failed: {}", err));
+            let cred = CREDENTIALW {
+                flags: 0,
+                cred_type: 1, // CRED_TYPE_GENERIC
+                target_name: target_wide.as_ptr(),
+                comment: ptr::null(),
+                last_written: FILETIME { dw_low_date_time: 0, dw_high_date_time: 0 },
+                credential_blob_size: secret_size,
+                credential_blob: secret_ptr,
+                persist: 2, // CRED_PERSIST_LOCAL_MACHINE
+                attribute_count: 0,
+                attributes: ptr::null(),
+                target_alias: ptr::null(),
+                user_name: user_wide.as_ptr(),
+            };
+
+            unsafe {
+                let _ = CredDeleteW(target_wide.as_ptr(), 1, 0);
+                let res = CredWriteW(&cred, 0);
+                if res == 0 {
+                    let err = std::io::Error::last_os_error();
+                    return Err(format!("Windows CredWriteW failed for {}: {}", target, err));
+                }
             }
         }
     }

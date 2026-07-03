@@ -163,7 +163,7 @@ fn stop_proxy_for_session(session_id: u64) {
 fn kill_running_antigravity(ide_type: &str) {
     #[cfg(target_os = "macos")]
     {
-        let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else if ide_type == "Antigravity CLI" { "agy" } else { "Antigravity IDE" };
         let _ = std::process::Command::new("pkill")
             .args(["-x", app_name])
             .output();
@@ -173,7 +173,7 @@ fn kill_running_antigravity(ide_type: &str) {
     }
     #[cfg(target_os = "windows")]
     {
-        let exe_name = if ide_type == "Antigravity 2.0" { "Antigravity.exe" } else { "Antigravity IDE.exe" };
+        let exe_name = if ide_type == "Antigravity 2.0" { "Antigravity.exe" } else if ide_type == "Antigravity CLI" { "agy.exe" } else { "Antigravity IDE.exe" };
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", exe_name])
             .output();
@@ -183,7 +183,7 @@ fn kill_running_antigravity(ide_type: &str) {
     }
     #[cfg(target_os = "linux")]
     {
-        let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
+        let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else if ide_type == "Antigravity CLI" { "agy" } else { "antigravity-ide" };
         let _ = std::process::Command::new("pkill")
             .args(["-x", bin_name])
             .output();
@@ -347,9 +347,44 @@ fn get_ide_resources_path(ide_type: &str, custom_exe_path: Option<&str>) -> Opti
     None
 }
 
+fn get_default_cli_path() -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        let path = std::path::PathBuf::from(&appdata).join("agy\\bin\\agy.exe");
+        if path.exists() {
+            return Ok(path);
+        }
+        let userprofile = std::env::var("USERPROFILE").unwrap_or_default();
+        let path2 = std::path::PathBuf::from(&userprofile).join("AppData\\Local\\agy\\bin\\agy.exe");
+        Ok(path2)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let path = std::path::PathBuf::from("/usr/local/bin/agy");
+        if path.exists() {
+            Ok(path)
+        } else {
+            let hb = std::path::PathBuf::from("/opt/homebrew/bin/agy");
+            Ok(hb)
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Ok(std::path::PathBuf::from("/usr/bin/agy"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("Unsupported OS for CLI".to_string())
+    }
+}
+
 /// Patch the IDE's main.js or app.asar to redirect hardcoded Google API URLs through local proxy.
 /// Returns Ok(true) if patched, Ok(false) if already patched or file not found.
 fn patch_ide_main_js(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bool, String> {
+    if ide_type == "Antigravity CLI" {
+        return Ok(false);
+    }
     let resources_dir = match get_ide_resources_path(ide_type, custom_exe_path) {
         Some(p) => p,
         None => {
@@ -386,6 +421,28 @@ fn patch_ide_main_js(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bo
 
 /// Find the language server binary path and patch it.
 fn patch_ide_language_server(ide_type: &str, custom_exe_path: Option<&str>) -> Result<bool, String> {
+    if ide_type == "Antigravity CLI" {
+        let agy_path = if let Some(path) = custom_exe_path {
+            if !path.is_empty() {
+                std::path::PathBuf::from(path)
+            } else {
+                get_default_cli_path()?
+            }
+        } else {
+            get_default_cli_path()?
+        };
+
+        if agy_path.exists() {
+            eprintln!("[Client] Found agy binary at: {:?}", agy_path);
+            if patch_binary_file(&agy_path)? {
+                return Ok(true);
+            }
+        } else {
+            return Err(format!("Antigravity CLI бинарный файл не найден по пути: {:?}", agy_path));
+        }
+        return Ok(false);
+    }
+
     let resources_dir = match get_ide_resources_path(ide_type, custom_exe_path) {
         Some(p) => p,
         None => {
@@ -673,94 +730,148 @@ fn patch_asar_file(asar_path: &std::path::Path) -> Result<bool, String> {
     }
 }
 
+fn spawn_cli_in_terminal(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let cmd_str = format!("/c start \"Antigravity CLI\" cmd.exe /k \"{}\"", path);
+        std::process::Command::new("cmd")
+            .raw_arg(&cmd_str)
+            .spawn()
+            .map_err(|e| format!("Не удалось запустить CLI в терминале Windows: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\"\"", path);
+        std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .spawn()
+            .map_err(|e| format!("Не удалось запустить CLI в терминале macOS: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("x-terminal-emulator")
+            .args(["-e", path])
+            .spawn()
+            .map_err(|e| format!("Не удалось запустить CLI в терминале Linux: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("Запуск терминала поддерживается только на Windows, macOS и Linux".to_string())
+    }
+}
+
 /// Start Antigravity IDE
 fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Result<(), String> {
     let mut child_opt = None;
 
-    if let Some(path) = custom_exe_path {
-        if !path.is_empty() {
-            let p = std::path::Path::new(path);
-            if !p.exists() {
-                return Err(format!("Указанный исполняемый файл не найден по пути: {}", path));
-            }
-            match std::process::Command::new(path).spawn() {
-                Ok(child) => {
-                    child_opt = Some(child);
-                }
-                Err(e) => {
-                    return Err(format!("Не удалось запустить указанный файл: {}", e));
-                }
-            }
-        }
-    }
-
-    if child_opt.is_none() {
-        #[cfg(target_os = "macos")]
-        {
-            let app_path = get_app_bundle_path(ide_type, custom_exe_path);
-            if !app_path.exists() {
-                return Err(format!("Приложение не найдено по стандартному пути: {:?}", app_path));
-            }
-            match std::process::Command::new("open")
-                .args(["-n", &app_path.to_string_lossy()])
-                .spawn() {
-                Ok(child) => {
-                    child_opt = Some(child);
-                }
-                Err(e) => {
-                    return Err(format!("Не удалось запустить open для приложения: {}", e));
-                }
-            }
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
-            let path = if ide_type == "Antigravity 2.0" {
-                format!(r"{}\Programs\antigravity\Antigravity.exe", appdata)
+    if ide_type == "Antigravity CLI" {
+        let path = if let Some(p) = custom_exe_path {
+            if !p.is_empty() {
+                p.to_string()
             } else {
-                format!(r"{}\Programs\Antigravity IDE\Antigravity IDE.exe", appdata)
-            };
-            
-            let p = std::path::Path::new(&path);
-            if !p.exists() {
-                return Err(format!("Файл запуска не найден по стандартному пути: {}", path));
+                get_default_cli_path()?.to_string_lossy().to_string()
             }
-            match std::process::Command::new(path).spawn() {
-                Ok(child) => {
-                    child_opt = Some(child);
+        } else {
+            get_default_cli_path()?.to_string_lossy().to_string()
+        };
+        let p_check = std::path::Path::new(&path);
+        if !p_check.exists() {
+            return Err(format!("Antigravity CLI бинарный файл не найден по пути: {}", path));
+        }
+        spawn_cli_in_terminal(&path)?;
+    } else {
+        if let Some(path) = custom_exe_path {
+            if !path.is_empty() {
+                let p = std::path::Path::new(path);
+                if !p.exists() {
+                    return Err(format!("Указанный исполняемый файл не найден по пути: {}", path));
                 }
-                Err(e) => {
-                    return Err(format!("Не удалось запустить стандартный файл: {}", e));
+                match std::process::Command::new(path).spawn() {
+                    Ok(child) => {
+                        child_opt = Some(child);
+                    }
+                    Err(e) => {
+                        return Err(format!("Не удалось запустить указанный файл: {}", e));
+                    }
                 }
             }
         }
-        #[cfg(target_os = "linux")]
-        {
-            // Inject settings.json before launching
-            let _ = crate::db::inject_to_settings(
-                "http://127.0.0.1:8047/v1",
-                ide_type
-            );
 
-            let bin_name = if ide_type == "Antigravity 2.0" { 
-                "antigravity" 
-            } else { 
-                "/home/yaaaa/projects/Antigravity IDE Linux/antigravity-ide" 
-            };
-            
-            let p = std::path::Path::new(bin_name);
-            if !p.exists() {
-                return Err(format!("Стандартный исполняемый файл Linux не найден: {}", bin_name));
-            }
-            match std::process::Command::new(bin_name)
-                .env("DONT_PROMPT_WSL_INSTALL", "1")
-                .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
-                .spawn() {
-                Ok(child) => {
-                    child_opt = Some(child);
+        if child_opt.is_none() {
+            #[cfg(target_os = "macos")]
+            {
+                let app_path = get_app_bundle_path(ide_type, custom_exe_path);
+                if !app_path.exists() {
+                    return Err(format!("Приложение не найдено по стандартному пути: {:?}", app_path));
                 }
-                Err(e) => {
-                    return Err(format!("Не удалось запустить Linux IDE: {}", e));
+                match std::process::Command::new("open")
+                    .args(["-n", &app_path.to_string_lossy()])
+                    .spawn() {
+                    Ok(child) => {
+                        child_opt = Some(child);
+                    }
+                    Err(e) => {
+                        return Err(format!("Не удалось запустить open для приложения: {}", e));
+                    }
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+                let path = if ide_type == "Antigravity 2.0" {
+                    format!(r"{}\Programs\antigravity\Antigravity.exe", appdata)
+                } else {
+                    format!(r"{}\Programs\Antigravity IDE\Antigravity IDE.exe", appdata)
+                };
+                
+                let p = std::path::Path::new(&path);
+                if !p.exists() {
+                    return Err(format!("Файл запуска не найден по стандартному пути: {}", path));
+                }
+                match std::process::Command::new(path).spawn() {
+                    Ok(child) => {
+                        child_opt = Some(child);
+                    }
+                    Err(e) => {
+                        return Err(format!("Не удалось запустить стандартный файл: {}", e));
+                    }
+                }
+            }
+            #[cfg(target_os = "linux")]
+            {
+                // Inject settings.json before launching
+                let _ = crate::db::inject_to_settings(
+                    "http://127.0.0.1:8047/v1",
+                    ide_type
+                );
+
+                let bin_name = if ide_type == "Antigravity 2.0" { 
+                    "antigravity" 
+                } else { 
+                    "/home/yaaaa/projects/Antigravity IDE Linux/antigravity-ide" 
+                };
+                
+                let p = std::path::Path::new(bin_name);
+                if !p.exists() {
+                    return Err(format!("Стандартный исполняемый файл Linux не найден: {}", bin_name));
+                }
+                match std::process::Command::new(bin_name)
+                    .env("DONT_PROMPT_WSL_INSTALL", "1")
+                    .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+                    .spawn() {
+                    Ok(child) => {
+                        child_opt = Some(child);
+                    }
+                    Err(e) => {
+                        return Err(format!("Не удалось запустить Linux IDE: {}", e));
+                    }
                 }
             }
         }
@@ -772,14 +883,17 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
         // Wait for the spawned process to exit to reap zombies
         if let Some(mut child) = child_opt {
             let _ = child.wait();
+        } else {
+            // Give process time to spawn and populate tasklist/pgrep
+            std::thread::sleep(std::time::Duration::from_secs(3));
         }
 
         #[cfg(target_os = "windows")]
-        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity.exe" } else { "Antigravity IDE.exe" };
+        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity.exe" } else if ide_type_clone == "Antigravity CLI" { "agy.exe" } else { "Antigravity IDE.exe" };
         #[cfg(target_os = "macos")]
-        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity" } else if ide_type_clone == "Antigravity CLI" { "agy" } else { "Antigravity IDE" };
         #[cfg(target_os = "linux")]
-        let exe_name = if ide_type_clone == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
+        let exe_name = if ide_type_clone == "Antigravity 2.0" { "antigravity" } else if ide_type_clone == "Antigravity CLI" { "agy" } else { "antigravity-ide" };
 
         loop {
             let is_running = {
@@ -823,6 +937,27 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
 }
 
 fn restore_files(ide_type: &str) -> Result<(), String> {
+    if ide_type == "Antigravity CLI" {
+        if let Ok(agy_path) = get_default_cli_path() {
+            if agy_path.exists() {
+                let mut backup_filename = agy_path.file_name().unwrap_or_default().to_os_string();
+                backup_filename.push(".bak");
+                let backup_path = agy_path.with_file_name(backup_filename);
+
+                if backup_path.exists() {
+                    eprintln!("[Client] Restoring original agy file from backup: {:?}", backup_path);
+                    let _ = std::fs::remove_file(&agy_path);
+                    if let Err(e) = std::fs::rename(&backup_path, &agy_path) {
+                        eprintln!("[Client] Failed to rename agy backup: {}. Trying copy.", e);
+                        let _ = std::fs::copy(&backup_path, &agy_path);
+                        let _ = std::fs::remove_file(&backup_path);
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let resources_dir = match get_ide_resources_path(ide_type, None) {
         Some(p) => p,
         None => {
@@ -957,12 +1092,13 @@ fn restore_original_state_all() {
     // Kill processes to ensure we can modify their files
     kill_running_antigravity("Antigravity IDE");
     kill_running_antigravity("Antigravity 2.0");
+    kill_running_antigravity("Antigravity CLI");
 
     if let Err(e) = db::clear_keyring_credentials() {
         eprintln!("[Client] Warning: Failed to clear keyring: {}", e);
     }
 
-    for ide in &["Antigravity IDE", "Antigravity 2.0"] {
+    for ide in &["Antigravity IDE", "Antigravity 2.0", "Antigravity CLI"] {
         if let Err(e) = db::clear_proxy_settings(ide) {
             eprintln!("[Client] Warning: Failed to clear proxy settings for {}: {}", ide, e);
         }
