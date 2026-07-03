@@ -68,6 +68,14 @@ async fn inject_token_and_start_ide(
     eprintln!("[Client] Starting reverse tunnel connection to Manager...");
     crate::tunnel::start_tunnel_worker(base_url.clone(), token.clone()).await;
 
+    #[cfg(target_os = "macos")]
+    {
+        let app_path = get_app_bundle_path(&ide_type, custom_exe_path.as_deref());
+        if let Err(e) = ensure_app_bundle_writable(&app_path) {
+            eprintln!("[Client] Warning: Failed to ensure app bundle writable: {}", e);
+        }
+    }
+
     // 6. Patch IDE main.js to route hardcoded Google API URLs through our local proxy
     eprintln!("[Client] Patching IDE main.js to redirect API traffic through local proxy...");
     let mut files_patched = false;
@@ -1077,4 +1085,53 @@ pub fn run() {
                 restore_original_state_all();
             }
         });
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_app_bundle_writable(app_path: &std::path::Path) -> Result<(), String> {
+    let resources_dir = app_path.join("Contents/Resources");
+    if !resources_dir.exists() {
+        return Ok(());
+    }
+    let test_file = resources_dir.join(".write_test");
+    match std::fs::write(&test_file, b"test") {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&test_file);
+            Ok(())
+        }
+        Err(_) => {
+            let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+            let app_name = app_path.file_name().ok_or_else(|| "Invalid app path".to_string())?;
+            let user_app_path = home.join("Applications").join(app_name);
+            
+            if user_app_path.exists() {
+                return Ok(());
+            }
+            
+            eprintln!("[Client] App bundle is not writable. Copying to ~/Applications to allow patching...");
+            
+            let user_apps_dir = home.join("Applications");
+            if !user_apps_dir.exists() {
+                std::fs::create_dir_all(&user_apps_dir)
+                    .map_err(|e| format!("Failed to create ~/Applications: {}", e))?;
+            }
+            
+            let output = std::process::Command::new("cp")
+                .args(["-R", &app_path.to_string_lossy(), &user_app_path.to_string_lossy()])
+                .output()
+                .map_err(|e| format!("Failed to run copy command: {}", e))?;
+                
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Copy failed: {}", err.trim()));
+            }
+            
+            let _ = std::process::Command::new("chmod")
+                .args(["-R", "u+rw", &user_app_path.to_string_lossy()])
+                .status();
+                
+            eprintln!("[Client] Successfully copied app bundle to {:?}", user_app_path);
+            Ok(())
+        }
+    }
 }
