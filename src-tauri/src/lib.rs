@@ -333,6 +333,15 @@ fn get_ide_resources_path(ide_type: &str, custom_exe_path: Option<&str>) -> Opti
     #[cfg(target_os = "linux")]
     {
         let home = dirs::home_dir().unwrap_or_default();
+        let custom_dir = if ide_type == "Antigravity 2.0" {
+            home.join("projects/Antigravity 2.0/resources")
+        } else {
+            home.join("projects/Antigravity IDE/Antigravity IDE/resources")
+        };
+        if custom_dir.exists() {
+            return Some(custom_dir);
+        }
+        
         let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
         let path = std::path::PathBuf::from(format!("/usr/share/{}/resources", bin_name));
         if path.exists() {
@@ -853,9 +862,9 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 );
 
                 let bin_name = if ide_type == "Antigravity 2.0" { 
-                    "antigravity" 
+                    "/home/yaaaa/projects/Antigravity 2.0/antigravity" 
                 } else { 
-                    "/home/yaaaa/projects/Antigravity IDE Linux/antigravity-ide" 
+                    "/home/yaaaa/projects/Antigravity IDE/Antigravity IDE/antigravity-ide" 
                 };
                 
                 let p = std::path::Path::new(bin_name);
@@ -1303,9 +1312,53 @@ async fn browse_executable() -> Result<Option<String>, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .setup(|_app| {
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
             eprintln!("[Client] Application startup. Running cleanup to ensure clean state...");
             restore_original_state_all();
+            
+            use tauri::menu::{Menu, MenuItem};
+            use tauri::tray::TrayIconBuilder;
+            
+            if let Some(icon) = app.default_window_icon() {
+                let show_i = MenuItem::with_id(app, "show", "Развернуть (Show)", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "quit", "Выход (Quit)", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+
+                let _tray = TrayIconBuilder::new()
+                    .icon(icon.clone())
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => {
+                            std::process::exit(0);
+                        }
+                        "show" => {
+                            use tauri::Manager;
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let tauri::tray::TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            ..
+                        } = event {
+                            use tauri::Manager;
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    })
+                    .build(app)?;
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1316,6 +1369,29 @@ pub fn run() {
             request_server,
             browse_executable
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let window_clone = window.clone();
+                use tauri::Manager;
+                let app_handle = window.app_handle().clone();
+                
+                use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                use tauri_plugin_dialog::MessageDialogKind;
+                
+                app_handle.dialog().message("Что сделать с клиентом Antigravity?")
+                    .title("Закрытие")
+                    .kind(MessageDialogKind::Info)
+                    .buttons(MessageDialogButtons::OkCancelCustom("Свернуть в трей".to_string(), "Закрыть полностью".to_string()))
+                    .show(move |result| {
+                        if result {
+                            let _ = window_clone.hide();
+                        } else {
+                            std::process::exit(0);
+                        }
+                    });
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {

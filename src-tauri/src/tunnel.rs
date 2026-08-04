@@ -31,6 +31,9 @@ async fn tunnel_loop(server_url: String, token: String) {
 
                 // Wait for CONNECT command with keepalive ping
                 let mut command_received = None;
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+                interval.tick().await; // Consume the first immediate tick
+                
                 loop {
                     tokio::select! {
                         msg = read.next() => {
@@ -51,7 +54,7 @@ async fn tunnel_loop(server_url: String, token: String) {
                                 _ => {}
                             }
                         }
-                        _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
+                        _ = interval.tick() => {
                             if write.send(Message::Ping(vec![].into())).await.is_err() {
                                 eprintln!("[Tunnel] Ping failed, connection dead");
                                 break;
