@@ -456,6 +456,14 @@ fn patch_ide_language_server(ide_type: &str, custom_exe_path: Option<&str>) -> R
         if agy_path.exists() {
             eprintln!("[Client] Found agy binary at: {:?}", agy_path);
             if patch_binary_file(&agy_path)? {
+                // Re-sign the binary on macOS after patching to avoid "Killed" by Gatekeeper
+                #[cfg(target_os = "macos")]
+                {
+                    eprintln!("[Client] Re-signing patched agy binary...");
+                    let _ = crate::process_utils::command("codesign")
+                        .args(&["--force", "--sign", "-", &agy_path.to_string_lossy()])
+                        .status();
+                }
                 return Ok(true);
             }
         } else {
