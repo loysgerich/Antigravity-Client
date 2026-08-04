@@ -916,6 +916,8 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
         #[cfg(target_os = "linux")]
         let exe_name = if ide_type_clone == "Antigravity 2.0" { "antigravity" } else if ide_type_clone == "Antigravity CLI" { "agy" } else { "antigravity-ide" };
 
+        let mut has_started = false;
+        let mut wait_cycles = 0;
         loop {
             let is_running = {
                 #[cfg(target_os = "windows")]
@@ -941,6 +943,15 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
             // Also check if proxy was stopped manually by user (PROXY_RUNNING is false)
             let proxy_running = crate::PROXY_RUNNING.load(std::sync::atomic::Ordering::SeqCst);
             let current_session = crate::PROXY_SESSION_ID.load(std::sync::atomic::Ordering::SeqCst);
+            
+            if is_running {
+                has_started = true;
+            } else if !has_started && wait_cycles < 5 {
+                // Wait up to 10 seconds (5 * 2s) for it to spawn before giving up
+                wait_cycles += 1;
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                continue;
+            }
 
             if !is_running || !proxy_running || current_session != session_id {
                 if proxy_running && current_session == session_id {
