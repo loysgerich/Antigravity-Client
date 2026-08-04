@@ -1,4 +1,4 @@
-# Antigravity Client (v1.0.28)
+# Antigravity Client (v1.0.29)
 
 GUI-клиент и локальный прокси-сервер для интеграции и перенаправления запросов авторизации/API из **Antigravity 2.0**, **Antigravity IDE** и консольного клиента **Antigravity CLI (agy)** на менеджер пула аккаунтов.
 
@@ -9,6 +9,14 @@ IDE (VS Code / JetBrains) или Antigravity CLI (agy)
    --> Antigravity-Manager (порт 8045 или 8055) 
    --> Google Backend
 ```
+
+---
+
+## 🚀 Что сделано в версии 1.0.29
+
+1. **Фикс автообновления на macOS**:
+   * Исправлен путь копирования `.app` бандла при обновлении: раньше копировал внутрь `Contents/MacOS/`, теперь корректно в `/Applications/` (или `~/Applications/`).
+   * После обновления автоматически выполняются `xattr -cr` и `codesign --force --deep --sign -`, так что пользователю **не нужно** вручную запускать эти команды в терминале.
 
 ---
 

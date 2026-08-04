@@ -1209,12 +1209,38 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
     
     #[cfg(target_os = "macos")]
     {
-        let parent_dir = current_exe.parent().ok_or("No parent directory found")?;
+        // Navigate from binary up to the .app bundle and its install directory:
+        // current_exe: /Applications/Antigravity Client.app/Contents/MacOS/Antigravity Client
+        // app_bundle:  /Applications/Antigravity Client.app
+        // install_dir: /Applications/
+        let app_bundle = current_exe
+            .parent()   // .../Contents/MacOS/
+            .and_then(|p| p.parent())   // .../Contents/
+            .and_then(|p| p.parent())   // .../Antigravity Client.app
+            .ok_or("Failed to find .app bundle path")?;
+        let install_dir = app_bundle
+            .parent()   // /Applications/ or ~/Applications/
+            .ok_or("Failed to find install directory")?;
+        let app_name = app_bundle
+            .file_name()
+            .ok_or("Failed to get .app bundle name")?
+            .to_string_lossy()
+            .to_string();
+
         let sh_command = format!(
-            "sleep 2; hdiutil attach -nobrowse -mountpoint /tmp/ag_mount '{}'; cp -R '/tmp/ag_mount/Antigravity Client.app' '{}'; hdiutil detach /tmp/ag_mount; open -n '{}'",
+            "sleep 2; \
+             hdiutil attach -nobrowse -mountpoint /tmp/ag_mount '{}'; \
+             cp -R '/tmp/ag_mount/{}' '{}/'; \
+             hdiutil detach /tmp/ag_mount; \
+             xattr -cr '{}/{}'; \
+             codesign --force --deep --sign - '{}/{}'; \
+             open -n '{}/{}'",
             msi_path.to_string_lossy(),
-            parent_dir.to_string_lossy(),
-            current_exe.to_string_lossy()
+            app_name,
+            install_dir.to_string_lossy(),
+            install_dir.to_string_lossy(), app_name,
+            install_dir.to_string_lossy(), app_name,
+            install_dir.to_string_lossy(), app_name,
         );
         
         eprintln!("[Client] Spawning macOS shell command: {}", sh_command);
