@@ -371,17 +371,28 @@ fn get_default_cli_path() -> Result<std::path::PathBuf, String> {
     }
     #[cfg(target_os = "macos")]
     {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let local_path = std::path::PathBuf::from(&home).join(".local/bin/agy");
         let path = std::path::PathBuf::from("/usr/local/bin/agy");
-        if path.exists() {
+        let hb = std::path::PathBuf::from("/opt/homebrew/bin/agy");
+        
+        if local_path.exists() {
+            Ok(local_path)
+        } else if path.exists() {
             Ok(path)
         } else {
-            let hb = std::path::PathBuf::from("/opt/homebrew/bin/agy");
             Ok(hb)
         }
     }
     #[cfg(target_os = "linux")]
     {
-        Ok(std::path::PathBuf::from("/usr/bin/agy"))
+        let home = std::env::var("HOME").unwrap_or_default();
+        let local_path = std::path::PathBuf::from(&home).join(".local/bin/agy");
+        if local_path.exists() {
+            Ok(local_path)
+        } else {
+            Ok(std::path::PathBuf::from("/usr/bin/agy"))
+        }
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
