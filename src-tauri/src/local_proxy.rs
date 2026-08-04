@@ -349,7 +349,9 @@ async fn proxy_request(
         .header("Access-Control-Allow-Origin", &cors_origin);
 
     // Copy response headers
-    let is_streaming_endpoint = path.contains("loadCodeAssist") || path.contains("chat");
+    let is_streaming_endpoint = path.contains("loadCodeAssist") 
+        || path.contains("chat") 
+        || path.contains("streamGenerateContent");
 
     for (name, value) in response.headers() {
         let name_lower = name.as_str().to_lowercase();
