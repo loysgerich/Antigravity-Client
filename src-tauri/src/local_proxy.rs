@@ -239,6 +239,27 @@ async fn proxy_request(
         return Ok(resp);
     }
 
+    // Intercept operations polling (onboarding status check) to avoid 404
+    if path.contains("/operations/") {
+        eprintln!("[LocalProxy] Intercepting operations status check: {}", path);
+        let mock_json = r#"{
+            "name": "operation-completed",
+            "done": true,
+            "response": {
+                "@type": "type.googleapis.com/google.protobuf.Empty"
+            }
+        }"#;
+
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .header("Access-Control-Allow-Origin", &cors_origin)
+            .body(full_box(bytes::Bytes::from(mock_json)))
+            .unwrap();
+        
+        return Ok(resp);
+    }
+
     if path.contains("fetchAdminControls") {
         eprintln!("[LocalProxy] Intercepting fetchAdminControls to avoid 400: {}", path);
         let mock_json = r#"{}"#;
