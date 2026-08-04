@@ -7,7 +7,7 @@ fn get_wsl_windows_appdata() -> Option<PathBuf> {
     if std::env::var("WSL_DISTRO_NAME").is_err() {
         return None;
     }
-    let output = std::process::Command::new("cmd.exe")
+    let output = crate::process_utils::command("cmd.exe")
         .args(&["/c", "echo %APPDATA%"])
         .output()
         .ok()?;
@@ -16,7 +16,7 @@ fn get_wsl_windows_appdata() -> Option<PathBuf> {
     if appdata.is_empty() || appdata == "%APPDATA%" {
         return None;
     }
-    let wslpath_output = std::process::Command::new("wslpath")
+    let wslpath_output = crate::process_utils::command("wslpath")
         .args(&["-u", appdata])
         .output()
         .ok()?;
@@ -226,13 +226,13 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
         use std::io::Write;
 
         // Delete old credential
-        let _ = Command::new("secret-tool")
+        let _ = crate::process_utils::command("secret-tool")
             .args(["clear", "service", "gemini", "username", "antigravity"])
             .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
             .output();
 
         // Write new credential
-        let mut child = Command::new("secret-tool")
+        let mut child = crate::process_utils::command("secret-tool")
             .args(["store", "--label=gemini", "service", "gemini", "username", "antigravity"])
             .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
             .stdin(std::process::Stdio::piped())
@@ -255,10 +255,10 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
         }
 
         if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
-            let _ = Command::new("cmdkey.exe")
+            let _ = crate::process_utils::command("cmdkey.exe")
                 .args(["/delete:gemini:antigravity"])
                 .output();
-            let _ = Command::new("cmdkey.exe")
+            let _ = crate::process_utils::command("cmdkey.exe")
                 .args(["/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", payload_json)])
                 .output();
             eprintln!("[Client] Also injected credential into Windows Credential Manager via WSL");
@@ -267,10 +267,10 @@ fn write_real_token_to_keyring(access_token: &str, refresh_token: &str, expiry: 
 
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("security")
+        let _ = crate::process_utils::command("security")
             .args(["delete-generic-password", "-s", "gemini", "-a", "antigravity"])
             .output();
-        let output = Command::new("security")
+        let output = crate::process_utils::command("security")
             .args(["add-generic-password", "-s", "gemini", "-a", "antigravity", "-w", &payload_json, "-A"])
             .output()
             .map_err(|e| format!("Failed to execute security command: {}", e))?;
@@ -392,18 +392,18 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
 
         // Ensure gnome-keyring-daemon is running (critical for WSL)
         // This uses a wrapper script that starts dbus + keyring if needed
-        let _ = Command::new("bash")
+        let _ = crate::process_utils::command("bash")
             .arg("-c")
             .arg("if [ -z \"$DBUS_SESSION_BUS_ADDRESS\" ]; then eval $(dbus-launch --sh-syntax); export DBUS_SESSION_BUS_ADDRESS; fi; killall -0 gnome-keyring-daemon || (rm -rf ~/.local/share/keyrings && mkdir -p ~/.local/share/keyrings && eval $(echo '' | gnome-keyring-daemon --unlock --components=secrets))")
             .output();
         
         // Delete old credential (ignore errors)
-        let _ = Command::new("secret-tool")
+        let _ = crate::process_utils::command("secret-tool")
             .args(["clear", "service", "gemini", "username", "antigravity"])
             .output();
 
         // Write new credential
-        let mut child = Command::new("secret-tool")
+        let mut child = crate::process_utils::command("secret-tool")
             .args(["store", "--label=gemini", "service", "gemini", "username", "antigravity"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -425,10 +425,10 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
         }
 
         if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
-            let _ = Command::new("cmdkey.exe")
+            let _ = crate::process_utils::command("cmdkey.exe")
                 .args(["/delete:gemini:antigravity"])
                 .output();
-            let _ = Command::new("cmdkey.exe")
+            let _ = crate::process_utils::command("cmdkey.exe")
                 .args(["/generic:gemini:antigravity", "/user:antigravity", &format!("/pass:{}", full_keyring_value)])
                 .output();
             eprintln!("[Client] Also injected old-format credential into Windows Credential Manager via WSL");
@@ -438,12 +438,12 @@ fn write_to_system_keyring(token: &str, expiry: i64) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         // Delete old
-        let _ = Command::new("security")
+        let _ = crate::process_utils::command("security")
             .args(["delete-generic-password", "-s", "gemini", "-a", "antigravity"])
             .output();
 
         // Write new
-        let output = Command::new("security")
+        let output = crate::process_utils::command("security")
             .args(["add-generic-password", "-s", "gemini", "-a", "antigravity", "-w", &full_keyring_value, "-A"])
             .output()
             .map_err(|e| format!("Failed to execute security command: {}", e))?;
@@ -682,13 +682,13 @@ pub fn clear_keyring_credentials() -> Result<(), String> {
     
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("secret-tool")
+        let _ = crate::process_utils::command("secret-tool")
             .args(["clear", "service", "gemini", "username", "antigravity"])
             .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
             .output();
             
         if let Ok(_) = std::env::var("WSL_DISTRO_NAME") {
-            let _ = Command::new("cmdkey.exe")
+            let _ = crate::process_utils::command("cmdkey.exe")
                 .args(["/delete:gemini:antigravity"])
                 .output();
         }
@@ -696,7 +696,7 @@ pub fn clear_keyring_credentials() -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("security")
+        let _ = crate::process_utils::command("security")
             .args(["delete-generic-password", "-s", "gemini", "-a", "antigravity"])
             .output();
     }

@@ -2,6 +2,7 @@ pub mod db;
 pub mod local_proxy;
 pub mod dns;
 pub mod tunnel;
+pub mod process_utils;
 pub mod utils {
     pub mod protobuf;
 }
@@ -164,30 +165,30 @@ fn kill_running_antigravity(ide_type: &str) {
     #[cfg(target_os = "macos")]
     {
         let app_name = if ide_type == "Antigravity 2.0" { "Antigravity" } else if ide_type == "Antigravity CLI" { "agy" } else { "Antigravity IDE" };
-        let _ = std::process::Command::new("pkill")
+        let _ = crate::process_utils::command("pkill")
             .args(["-x", app_name])
             .output();
-        let _ = std::process::Command::new("pkill")
+        let _ = crate::process_utils::command("pkill")
             .args(["-x", "language_server"])
             .output();
     }
     #[cfg(target_os = "windows")]
     {
         let exe_name = if ide_type == "Antigravity 2.0" { "Antigravity.exe" } else if ide_type == "Antigravity CLI" { "agy.exe" } else { "Antigravity IDE.exe" };
-        let _ = std::process::Command::new("taskkill")
+        let _ = crate::process_utils::command("taskkill")
             .args(["/F", "/IM", exe_name])
             .output();
-        let _ = std::process::Command::new("taskkill")
+        let _ = crate::process_utils::command("taskkill")
             .args(["/F", "/IM", "language_server.exe"])
             .output();
     }
     #[cfg(target_os = "linux")]
     {
         let bin_name = if ide_type == "Antigravity 2.0" { "antigravity" } else if ide_type == "Antigravity CLI" { "agy" } else { "antigravity-ide" };
-        let _ = std::process::Command::new("pkill")
+        let _ = crate::process_utils::command("pkill")
             .args(["-x", bin_name])
             .output();
-        let _ = std::process::Command::new("pkill")
+        let _ = crate::process_utils::command("pkill")
             .args(["-f", "language_server"])
             .output();
     }
@@ -226,14 +227,14 @@ fn bypass_macos_signature_protection(app_path: &std::path::Path) {
     
     // 1. Remove quarantine flag from the outer bundle itself (non-recursively) to bypass Gatekeeper.
     // This succeeds even without Full Disk Access as long as the user owns the bundle directory.
-    let _ = std::process::Command::new("xattr")
+    let _ = crate::process_utils::command("xattr")
         .arg("-d")
         .arg("com.apple.quarantine")
         .arg(app_path)
         .status();
 
     // Try recursive xattr cleanup but ignore errors if some system frameworks are read-only
-    let _ = std::process::Command::new("xattr")
+    let _ = crate::process_utils::command("xattr")
         .arg("-cr")
         .arg(app_path)
         .status();
@@ -257,7 +258,7 @@ fn bypass_macos_signature_protection(app_path: &std::path::Path) {
             for name in &binary_names {
                 let bin_path = bin_dir.join(name);
                 if bin_path.exists() {
-                    let _ = std::process::Command::new("codesign")
+                    let _ = crate::process_utils::command("codesign")
                         .args(&["--force", "--sign", "-", &bin_path.to_string_lossy()])
                         .status();
                 }
@@ -267,7 +268,7 @@ fn bypass_macos_signature_protection(app_path: &std::path::Path) {
 
     // 3. Sign the main app bundle itself WITHOUT --deep to avoid "Operation not permitted"
     // on unmodified system frameworks (e.g. Squirrel.framework) while successfully re-signing app.asar and main executable.
-    let status_codesign = std::process::Command::new("codesign")
+    let status_codesign = crate::process_utils::command("codesign")
         .args(&["--force", "--sign", "-", &app_path.to_string_lossy()])
         .status();
     match status_codesign {
@@ -744,7 +745,7 @@ fn spawn_cli_in_terminal(path: &str) -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
         let cmd_str = format!("/c start \"Antigravity CLI\" cmd.exe /k \"{}\"", path);
-        std::process::Command::new("cmd")
+        crate::process_utils::command("cmd")
             .raw_arg(&cmd_str)
             .spawn()
             .map_err(|e| format!("Не удалось запустить CLI в терминале Windows: {}", e))?;
@@ -754,7 +755,7 @@ fn spawn_cli_in_terminal(path: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\"\"", path);
-        std::process::Command::new("osascript")
+        crate::process_utils::command("osascript")
             .args(["-e", &script])
             .spawn()
             .map_err(|e| format!("Не удалось запустить CLI в терминале macOS: {}", e))?;
@@ -763,7 +764,7 @@ fn spawn_cli_in_terminal(path: &str) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("x-terminal-emulator")
+        crate::process_utils::command("x-terminal-emulator")
             .args(["-e", path])
             .spawn()
             .map_err(|e| format!("Не удалось запустить CLI в терминале Linux: {}", e))?;
@@ -802,7 +803,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 if !p.exists() {
                     return Err(format!("Указанный исполняемый файл не найден по пути: {}", path));
                 }
-                match std::process::Command::new(path).spawn() {
+                match crate::process_utils::command(path).spawn() {
                     Ok(child) => {
                         child_opt = Some(child);
                     }
@@ -820,7 +821,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 if !app_path.exists() {
                     return Err(format!("Приложение не найдено по стандартному пути: {:?}", app_path));
                 }
-                match std::process::Command::new("open")
+                match crate::process_utils::command("open")
                     .args(["-n", &app_path.to_string_lossy()])
                     .spawn() {
                     Ok(child) => {
@@ -844,7 +845,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 if !p.exists() {
                     return Err(format!("Файл запуска не найден по стандартному пути: {}", path));
                 }
-                match std::process::Command::new(path).spawn() {
+                match crate::process_utils::command(path).spawn() {
                     Ok(child) => {
                         child_opt = Some(child);
                     }
@@ -871,7 +872,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 if !p.exists() {
                     return Err(format!("Стандартный исполняемый файл Linux не найден: {}", bin_name));
                 }
-                match std::process::Command::new(bin_name)
+                match crate::process_utils::command(bin_name)
                     .env("DONT_PROMPT_WSL_INSTALL", "1")
                     .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
                     .spawn() {
@@ -908,7 +909,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
             let is_running = {
                 #[cfg(target_os = "windows")]
                 {
-                    if let Ok(output) = std::process::Command::new("tasklist").args(&["/FI", &format!("IMAGENAME eq {}", exe_name), "/NH"]).output() {
+                    if let Ok(output) = crate::process_utils::command("tasklist").args(&["/FI", &format!("IMAGENAME eq {}", exe_name), "/NH"]).output() {
                         String::from_utf8_lossy(&output.stdout).to_lowercase().contains(&exe_name.to_lowercase())
                     } else {
                         true // fallback if tasklist fails
@@ -918,7 +919,7 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
                 {
                     // Use pgrep with -f to match against the full command line path, which is much more robust
                     // since some Electron versions run with the generic process name 'Electron' but their path contains the app name.
-                    if let Ok(output) = std::process::Command::new("pgrep").arg("-f").arg(exe_name).output() {
+                    if let Ok(output) = crate::process_utils::command("pgrep").arg("-f").arg(exe_name).output() {
                         output.status.success()
                     } else {
                         true // fallback if pgrep fails
@@ -1163,7 +1164,7 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
         
         eprintln!("[Client] Spawning PowerShell command: {}", ps_command);
         
-        std::process::Command::new("powershell")
+        crate::process_utils::command("powershell")
             .arg("-NoProfile")
             .arg("-WindowStyle")
             .arg("Hidden")
@@ -1188,7 +1189,7 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
         
         eprintln!("[Client] Spawning macOS shell command: {}", sh_command);
         
-        std::process::Command::new("sh")
+        crate::process_utils::command("sh")
             .arg("-c")
             .arg(sh_command)
             .spawn()
@@ -1209,7 +1210,7 @@ async fn install_client_update(app_handle: tauri::AppHandle, download_url: Strin
         
         eprintln!("[Client] Spawning Linux shell command: {}", sh_command);
         
-        std::process::Command::new("sh")
+        crate::process_utils::command("sh")
             .arg("-c")
             .arg(sh_command)
             .spawn()
@@ -1265,7 +1266,7 @@ async fn browse_executable() -> Result<Option<String>, String> {
             }
         "#;
 
-        let output = std::process::Command::new("powershell")
+        let output = crate::process_utils::command("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
             .output()
             .map_err(|e| format!("Failed to run file dialog: {}", e))?;
@@ -1285,7 +1286,7 @@ async fn browse_executable() -> Result<Option<String>, String> {
 
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("osascript")
+        let output = crate::process_utils::command("osascript")
             .args(["-e", "POSIX path of (choose file with prompt \"Select Antigravity Executable\")"])
             .output()
             .map_err(|e| format!("Failed to run file dialog: {}", e))?;
@@ -1431,7 +1432,7 @@ fn ensure_app_bundle_writable(app_path: &std::path::Path) -> Result<(), String> 
                     .map_err(|e| format!("Failed to create ~/Applications: {}", e))?;
             }
             
-            let output = std::process::Command::new("cp")
+            let output = crate::process_utils::command("cp")
                 .args(["-R", &app_path.to_string_lossy(), &user_app_path.to_string_lossy()])
                 .output()
                 .map_err(|e| format!("Failed to run copy command: {}", e))?;
@@ -1441,7 +1442,7 @@ fn ensure_app_bundle_writable(app_path: &std::path::Path) -> Result<(), String> 
                 return Err(format!("Copy failed: {}", err.trim()));
             }
             
-            let _ = std::process::Command::new("chmod")
+            let _ = crate::process_utils::command("chmod")
                 .args(["-R", "u+rw", &user_app_path.to_string_lossy()])
                 .status();
                 
