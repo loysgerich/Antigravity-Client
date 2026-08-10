@@ -14,6 +14,7 @@ use tokio::sync::watch;
 static PROXY_SHUTDOWN: Mutex<Option<watch::Sender<bool>>> = Mutex::new(None);
 static PROXY_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static PROXY_SESSION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static BINARY_WATCHER_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[tauri::command]
 async fn inject_token_and_start_ide(
@@ -908,72 +909,291 @@ fn start_antigravity_ide(ide_type: &str, custom_exe_path: Option<&str>) -> Resul
 
     let ide_type_clone = ide_type.to_string();
     let session_id = PROXY_SESSION_ID.load(std::sync::atomic::Ordering::SeqCst);
-    std::thread::spawn(move || {
-        // Wait for the spawned process to exit to reap zombies
+
+    // For CLI mode: don't stop proxy when agy exits — user may open multiple terminals.
+    // The proxy stays alive until the user explicitly clicks "Disconnect".
+    // Also start a background binary watcher to re-patch agy if it auto-updates.
+    if ide_type_clone == "Antigravity CLI" {
+        // Start binary watcher for CLI (re-patches agy if it auto-updates)
+        start_binary_watcher(None);
+
+        // Only reap the spawned child, don't monitor process lifecycle
         if let Some(mut child) = child_opt {
-            let _ = child.wait();
-        } else {
-            // Give process time to spawn and populate tasklist/pgrep
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            std::thread::spawn(move || { let _ = child.wait(); });
         }
-
-        #[cfg(target_os = "windows")]
-        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity.exe" } else if ide_type_clone == "Antigravity CLI" { "agy.exe" } else { "Antigravity IDE.exe" };
-        #[cfg(target_os = "macos")]
-        let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity" } else if ide_type_clone == "Antigravity CLI" { "agy" } else { "Antigravity IDE" };
-        #[cfg(target_os = "linux")]
-        let exe_name = if ide_type_clone == "Antigravity 2.0" { "antigravity" } else if ide_type_clone == "Antigravity CLI" { "agy" } else { "antigravity-ide" };
-
-        let mut has_started = false;
-        let mut wait_cycles = 0;
-        loop {
-            let is_running = {
-                #[cfg(target_os = "windows")]
-                {
-                    if let Ok(output) = crate::process_utils::command("tasklist").args(&["/FI", &format!("IMAGENAME eq {}", exe_name), "/NH"]).output() {
-                        String::from_utf8_lossy(&output.stdout).to_lowercase().contains(&exe_name.to_lowercase())
-                    } else {
-                        true // fallback if tasklist fails
-                    }
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    // Use pgrep with -f to match against the full command line path, which is much more robust
-                    // since some Electron versions run with the generic process name 'Electron' but their path contains the app name.
-                    if let Ok(output) = crate::process_utils::command("pgrep").arg("-f").arg(exe_name).output() {
-                        output.status.success()
-                    } else {
-                        true // fallback if pgrep fails
-                    }
-                }
-            };
-
-            // Also check if proxy was stopped manually by user (PROXY_RUNNING is false)
-            let proxy_running = crate::PROXY_RUNNING.load(std::sync::atomic::Ordering::SeqCst);
-            let current_session = crate::PROXY_SESSION_ID.load(std::sync::atomic::Ordering::SeqCst);
-            
-            if is_running {
-                has_started = true;
-            } else if !has_started && wait_cycles < 5 {
-                // Wait up to 10 seconds (5 * 2s) for it to spawn before giving up
-                wait_cycles += 1;
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                continue;
+    } else {
+        // For IDE modes: monitor the process and stop proxy when it exits
+        std::thread::spawn(move || {
+            // Wait for the spawned process to exit to reap zombies
+            if let Some(mut child) = child_opt {
+                let _ = child.wait();
+            } else {
+                // Give process time to spawn and populate tasklist/pgrep
+                std::thread::sleep(std::time::Duration::from_secs(3));
             }
 
-            if !is_running || !proxy_running || current_session != session_id {
-                if proxy_running && current_session == session_id {
-                    eprintln!("[Client] IDE process exited. Stopping proxy.");
-                    crate::stop_proxy_for_session(session_id);
+            #[cfg(target_os = "windows")]
+            let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity.exe" } else { "Antigravity IDE.exe" };
+            #[cfg(target_os = "macos")]
+            let exe_name = if ide_type_clone == "Antigravity 2.0" { "Antigravity" } else { "Antigravity IDE" };
+            #[cfg(target_os = "linux")]
+            let exe_name = if ide_type_clone == "Antigravity 2.0" { "antigravity" } else { "antigravity-ide" };
+
+            let mut has_started = false;
+            let mut wait_cycles = 0;
+            loop {
+                let is_running = {
+                    #[cfg(target_os = "windows")]
+                    {
+                        if let Ok(output) = crate::process_utils::command("tasklist").args(&["/FI", &format!("IMAGENAME eq {}", exe_name), "/NH"]).output() {
+                            String::from_utf8_lossy(&output.stdout).to_lowercase().contains(&exe_name.to_lowercase())
+                        } else {
+                            true // fallback if tasklist fails
+                        }
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        if let Ok(output) = crate::process_utils::command("pgrep").arg("-f").arg(exe_name).output() {
+                            output.status.success()
+                        } else {
+                            true // fallback if pgrep fails
+                        }
+                    }
+                };
+
+                let proxy_running = crate::PROXY_RUNNING.load(std::sync::atomic::Ordering::SeqCst);
+                let current_session = crate::PROXY_SESSION_ID.load(std::sync::atomic::Ordering::SeqCst);
+                
+                if is_running {
+                    has_started = true;
+                } else if !has_started && wait_cycles < 5 {
+                    wait_cycles += 1;
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    continue;
                 }
+
+                if !is_running || !proxy_running || current_session != session_id {
+                    if proxy_running && current_session == session_id {
+                        eprintln!("[Client] IDE process exited. Stopping proxy.");
+                        crate::stop_proxy_for_session(session_id);
+                    }
+                    break;
+                }
+
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        });
+    }
+
+    Ok(())
+}
+
+/// Background watcher that monitors the agy binary for auto-updates.
+/// If the binary is modified (e.g. agy downloads a new version of itself),
+/// it re-patches the binary and re-signs it on macOS.
+fn start_binary_watcher(custom_exe_path: Option<String>) {
+    // Only start one watcher
+    if BINARY_WATCHER_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        eprintln!("[BinaryWatcher] Already running, skipping duplicate start");
+        return;
+    }
+
+    std::thread::spawn(move || {
+        eprintln!("[BinaryWatcher] Started monitoring agy binary for auto-updates");
+
+        let agy_path = if let Some(ref p) = custom_exe_path {
+            if !p.is_empty() {
+                std::path::PathBuf::from(p)
+            } else {
+                match get_default_cli_path() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("[BinaryWatcher] Failed to get CLI path: {}", e);
+                        BINARY_WATCHER_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+                        return;
+                    }
+                }
+            }
+        } else {
+            match get_default_cli_path() {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[BinaryWatcher] Failed to get CLI path: {}", e);
+                    BINARY_WATCHER_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+                    return;
+                }
+            }
+        };
+
+        // Track last known state
+        let mut last_modified = std::fs::metadata(&agy_path)
+            .and_then(|m| m.modified())
+            .ok();
+        let mut last_size = std::fs::metadata(&agy_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        loop {
+            // Stop if proxy is no longer running
+            if !PROXY_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+                eprintln!("[BinaryWatcher] Proxy stopped, shutting down watcher");
                 break;
             }
 
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        }
-    });
+            std::thread::sleep(std::time::Duration::from_secs(15));
 
-    Ok(())
+            // Check if binary was modified
+            let current_modified = std::fs::metadata(&agy_path)
+                .and_then(|m| m.modified())
+                .ok();
+            let current_size = std::fs::metadata(&agy_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+
+            let changed = match (&last_modified, &current_modified) {
+                (Some(old), Some(new)) => old != new || last_size != current_size,
+                (None, Some(_)) => true,
+                _ => false,
+            };
+
+            if changed {
+                eprintln!("[BinaryWatcher] Detected agy binary change! Size: {} -> {}", last_size, current_size);
+                
+                // Check if it's still patched by reading a small portion
+                let needs_patch = match std::fs::read(&agy_path) {
+                    Ok(content) => {
+                        // If the binary contains the original Google URL, it needs patching
+                        content.windows(b"cloudcode-pa.googleapis.com".len())
+                            .any(|w| w == b"cloudcode-pa.googleapis.com")
+                    }
+                    Err(e) => {
+                        eprintln!("[BinaryWatcher] Failed to read binary: {}", e);
+                        false
+                    }
+                };
+
+                if needs_patch {
+                    eprintln!("[BinaryWatcher] Binary is unpatched (auto-update detected). Re-patching...");
+                    
+                    // Update the backup with the new version before patching
+                    let mut backup_filename = agy_path.file_name().unwrap_or_default().to_os_string();
+                    backup_filename.push(".bak");
+                    let backup_path = agy_path.with_file_name(&backup_filename);
+                    
+                    // Save the new unpatched binary as the backup
+                    if let Err(e) = std::fs::copy(&agy_path, &backup_path) {
+                        eprintln!("[BinaryWatcher] Failed to update backup: {}", e);
+                    }
+
+                    // Now patch the binary directly (not from backup)
+                    match patch_binary_file_direct(&agy_path) {
+                        Ok(true) => {
+                            eprintln!("[BinaryWatcher] Successfully re-patched agy binary");
+                            
+                            // Re-sign on macOS
+                            #[cfg(target_os = "macos")]
+                            {
+                                eprintln!("[BinaryWatcher] Re-signing patched agy binary...");
+                                let _ = crate::process_utils::command("codesign")
+                                    .args(&["--force", "--sign", "-", &agy_path.to_string_lossy()])
+                                    .status();
+                            }
+                        }
+                        Ok(false) => {
+                            eprintln!("[BinaryWatcher] Binary was already patched (false alarm)");
+                        }
+                        Err(e) => {
+                            eprintln!("[BinaryWatcher] Failed to re-patch: {}", e);
+                        }
+                    }
+                }
+
+                // Update tracking state
+                last_modified = current_modified;
+                last_size = current_size;
+            }
+        }
+
+        BINARY_WATCHER_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        eprintln!("[BinaryWatcher] Stopped");
+    });
+}
+
+/// Patch binary in-place without restoring from backup first.
+/// Used by the watcher when agy auto-updated itself.
+fn patch_binary_file_direct(path: &std::path::Path) -> Result<bool, String> {
+    let mut content = std::fs::read(path)
+        .map_err(|e| format!("Failed to read binary file {:?}: {}", path, e))?;
+
+    let replacements = [
+        (
+            b"https://cloudcode-pa.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal///".to_vec()
+        ),
+        (
+            b"https://autopush-cloudcode-pa.sandbox.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal////////////////////".to_vec()
+        ),
+        (
+            b"https://preprod-daily-cloudcode-pa.sandbox.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////////////////////".to_vec()
+        ),
+        (
+            b"https://daily-cloudcode-pa.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////".to_vec()
+        ),
+        (
+            b"https://www.googleapis.com/oauth2/v2/userinfo".to_vec(),
+            b"http://127.0.0.1:8047/userinfo///////////////".to_vec()
+        ),
+        (
+            b"https://play.googleapis.com/log".to_vec(),
+            b"http://127.0.0.1:8047/log//////".to_vec()
+        ),
+        (
+            b"https://www.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/////".to_vec()
+        ),
+        (
+            b"https://oauth2.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047////////".to_vec()
+        ),
+        (
+            b"https://generativelanguage.googleapis.com".to_vec(),
+            b"http://127.0.0.1:8047/v1internal/////////".to_vec()
+        ),
+        (
+            b"aicode.googleapis.com".to_vec(),
+            b"aaaa.127.0.0.1.nip.io".to_vec()
+        ),
+    ];
+
+    let mut patched_any = false;
+    for (from, to) in &replacements {
+        assert_eq!(from.len(), to.len(), "Replacement lengths must match exactly!");
+        if from.is_empty() {
+            continue;
+        }
+        let mut i = 0;
+        while i + from.len() <= content.len() {
+            if let Some(pos) = content[i..].windows(from.len()).position(|w| w == *from) {
+                let match_pos = i + pos;
+                content[match_pos..match_pos + from.len()].copy_from_slice(to);
+                patched_any = true;
+                i = match_pos + from.len();
+            } else {
+                break;
+            }
+        }
+    }
+
+    if patched_any {
+        std::fs::write(path, content)
+            .map_err(|e| format!("Failed to write patched binary {:?}: {}", path, e))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 fn restore_files(ide_type: &str) -> Result<(), String> {
