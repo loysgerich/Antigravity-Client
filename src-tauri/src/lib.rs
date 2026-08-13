@@ -313,6 +313,25 @@ fn get_ide_resources_path(ide_type: &str, custom_exe_path: Option<&str>) -> Opti
         if path_lower.exists() {
             return Some(path_lower);
         }
+        // Additional fallbacks for common installer names
+        let fallbacks = ["antigravity-ide-client", "Antigravity-IDE-Client", "Cursor", "cursor"];
+        for f in fallbacks.iter() {
+            let fp = std::path::PathBuf::from(&appdata).join("Programs").join(f).join("resources");
+            if fp.exists() {
+                return Some(fp);
+            }
+        }
+        // Check standard Program Files
+        for f in fallbacks.iter().chain(["Antigravity IDE", "Antigravity", "antigravity"].iter()) {
+            let fp1 = std::path::PathBuf::from(r"C:\Program Files").join(f).join("resources");
+            if fp1.exists() {
+                return Some(fp1);
+            }
+            let fp2 = std::path::PathBuf::from(r"C:\Program Files (x86)").join(f).join("resources");
+            if fp2.exists() {
+                return Some(fp2);
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]
