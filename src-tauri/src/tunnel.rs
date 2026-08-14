@@ -24,6 +24,10 @@ async fn tunnel_loop(server_url: String, token: String) {
             "Authorization",
             format!("Bearer {}", token).parse().unwrap(),
         );
+        request.headers_mut().insert(
+            "User-Agent",
+            "Antigravity-Client/1.0".parse().unwrap(),
+        );
         match connect_async(request).await {
             Ok((ws_stream, _)) => {
                 eprintln!("[Tunnel] Connected to Manager WebSocket");
@@ -72,25 +76,29 @@ async fn tunnel_loop(server_url: String, token: String) {
                             let port: u16 = parts[2].parse().unwrap_or(443);
                             eprintln!("[Tunnel] Manager requested connection to {}:{}", host, port);
 
-                            // Use custom DNS (xbox-dns.ru) to resolve host
-                            let resolver = crate::dns::create_custom_resolver();
-                            let ip = match resolver.lookup_ip(host).await {
-                                Ok(response) => {
-                                    if let Some(ip) = response.iter().next() {
-                                        ip
-                                    } else {
-                                        let _ = write.send(Message::Text("ERROR No IP found".to_string().into())).await;
+                            let ip = if let Ok(parsed_ip) = host.parse::<std::net::IpAddr>() {
+                                parsed_ip
+                            } else {
+                                // Use custom DNS (xbox-dns.ru) to resolve host
+                                let resolver = crate::dns::create_custom_resolver();
+                                match resolver.lookup_ip(host).await {
+                                    Ok(response) => {
+                                        if let Some(ip) = response.iter().next() {
+                                            ip
+                                        } else {
+                                            let _ = write.send(Message::Text("ERROR No IP found".to_string().into())).await;
+                                            continue;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[Tunnel] DNS resolution failed: {}", e);
+                                        let _ = write.send(Message::Text(format!("ERROR DNS failed: {}", e).into())).await;
                                         continue;
                                     }
                                 }
-                                Err(e) => {
-                                    eprintln!("[Tunnel] DNS resolution failed: {}", e);
-                                    let _ = write.send(Message::Text(format!("ERROR DNS failed: {}", e).into())).await;
-                                    continue;
-                                }
                             };
 
-                            match TcpStream::connect(std::net::SocketAddr::new(ip, port)).await {
+                            match tokio::net::TcpStream::connect(std::net::SocketAddr::new(ip, port)).await {
                                 Ok(mut target_stream) => {
                                     let _ = write.send(Message::Text("CONNECTED".to_string().into())).await;
                                     eprintln!("[Tunnel] Target connected, bridging bytes...");

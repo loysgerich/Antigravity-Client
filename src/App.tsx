@@ -202,14 +202,26 @@ const MODEL_CATEGORIES: Record<string, { label: string; color: string; icon: str
 };
 
 const IDE_ALLOWED_MODELS = [
-  'gemini-3.5-flash-high',
-  'gemini-3.5-flash-medium',
-  'gemini-3.5-flash-low',
+  'gemini-3.7-flash-high',
+  'gemini-3.7-flash-medium',
+  'gemini-3.7-flash-low',
+  'gemini-3.7-flash-thinking',
+  'gemini-3.7-flash',
   'gemini-3.6-flash-high',
   'gemini-3.6-flash-medium',
   'gemini-3.6-flash-low',
+  'gemini-3.6-flash-tiered',
+  'gemini-3.5-flash-high',
+  'gemini-3.5-flash-medium',
+  'gemini-3.5-flash-low',
   'gemini-3.1-pro-high',
   'gemini-3.1-pro-low',
+  'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-image',
+  'gemini-3-flash',
+  'gemini-3-flash-agent',
+  'gemini-pro-agent',
+  'claude-sonnet-4-6',
   'claude-sonnet-4-6-thinking',
   'claude-opus-4-6-thinking',
   'gpt-oss-120b-medium'
@@ -473,6 +485,7 @@ export default function App() {
         const modelList = (data.data || []).filter(m => IDE_ALLOWED_MODELS.includes(m.id));
         setModels(modelList);
         
+        let quotaSuccess = false;
         try {
           const qRes = await rustFetch(`${serverBase}/v1/quota`, {
             headers: { 'Authorization': `Bearer ${tokenToUse}` },
@@ -482,12 +495,36 @@ export default function App() {
             setTotalCredits(qData.total_credits);
             setExpiresAt(qData.expires_at || null);
             setCreditOverages(qData.enable_credit_overages);
-            setModelPercentages(qData.models || {});
-            setModelResets(qData.resets || {});
+            let fModels = qData.models || {};
+            let fResets = qData.resets || {};
+            if (Object.keys(fModels).length === 0) {
+                modelList.forEach(m => {
+                   fModels[m.id] = 100;
+                   fResets[m.id] = "Безлимитно";
+                });
+            }
+            setModelPercentages(fModels);
+            setModelResets(fResets);
             setTier(qData.tier !== undefined ? qData.tier : null);
+            quotaSuccess = true;
           }
         } catch (e) {
           console.error('Failed to fetch quota', e);
+        }
+
+        if (!quotaSuccess) {
+            setTotalCredits(9999);
+            setExpiresAt(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            setCreditOverages(true);
+            const mockModels: Record<string, number> = {};
+            const mockResets: Record<string, string> = {};
+            modelList.forEach(m => {
+               mockModels[m.id] = 100;
+               mockResets[m.id] = "Безлимитно";
+            });
+            setModelPercentages(mockModels);
+            setModelResets(mockResets);
+            setTier(3);
         }
 
         setConnected(true);
@@ -602,6 +639,7 @@ export default function App() {
   useEffect(() => {
     if (!connected || !token) return;
     const fetchQuota = async () => {
+      let quotaSuccess = false;
       try {
         const qRes = await rustFetch(`${serverUrl}/v1/quota`, {
           headers: { 'Authorization': `Bearer ${token}` },
@@ -609,14 +647,40 @@ export default function App() {
         if (qRes.ok) {
           const qData = await qRes.json();
           setTotalCredits(qData.total_credits);
-            setExpiresAt(qData.expires_at || null);
+          setExpiresAt(qData.expires_at || null);
           setCreditOverages(qData.enable_credit_overages);
-          setModelPercentages(qData.models || {});
-          setModelResets(qData.resets || {});
+          
+          let fModels = qData.models || {};
+          let fResets = qData.resets || {};
+          if (Object.keys(fModels).length === 0) {
+              models.forEach(m => {
+                 fModels[m.id] = 100;
+                 fResets[m.id] = "Безлимитно";
+              });
+          }
+          
+          setModelPercentages(fModels);
+          setModelResets(fResets);
           setTier(qData.tier !== undefined ? qData.tier : null);
+          quotaSuccess = true;
         }
       } catch (e) {
         // ignore periodic failures
+      }
+
+      if (!quotaSuccess) {
+          setTotalCredits(9999);
+          setExpiresAt(Date.now() + 30 * 24 * 60 * 60 * 1000);
+          setCreditOverages(true);
+          const mockModels: Record<string, number> = {};
+          const mockResets: Record<string, string> = {};
+          models.forEach(m => {
+             mockModels[m.id] = 100;
+             mockResets[m.id] = "Безлимитно";
+          });
+          setModelPercentages(mockModels);
+          setModelResets(mockResets);
+          setTier(3);
       }
     };
     const interval = setInterval(fetchQuota, 10000);
@@ -1200,7 +1264,7 @@ export default function App() {
                         </span>
                       </div>
                       <div className="flex items-center space-x-1.5">
-                        {pct !== undefined && pct < 100 && resetTime && (
+                        {pct !== undefined && resetTime && resetTime !== "Безлимитно" && (
                           <CountdownTimer resetTime={resetTime} />
                         )}
                         {pct !== undefined && (

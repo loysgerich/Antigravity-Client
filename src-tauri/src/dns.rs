@@ -19,11 +19,7 @@ pub fn create_custom_resolver() -> TokioAsyncResolver {
     doh_server1.tls_dns_name = Some("xbox-dns.ru".to_string());
     config.add_name_server(doh_server1);
 
-    // UDP Fallbacks
-    config.add_name_server(NameServerConfig::new(SocketAddr::new(xbox_ip4_1, 53), Protocol::Udp));
-    config.add_name_server(NameServerConfig::new(SocketAddr::new(xbox_ip4_2, 53), Protocol::Udp));
-    config.add_name_server(NameServerConfig::new(SocketAddr::new(xbox_ip6_1, 53), Protocol::Udp));
-    config.add_name_server(NameServerConfig::new(SocketAddr::new(xbox_ip6_2, 53), Protocol::Udp));
+    // UDP Fallbacks removed to prevent ISP DNS interception!
 
     let mut opts = ResolverOpts::default();
     opts.use_hosts_file = false; // Strictly ignore OS hosts file

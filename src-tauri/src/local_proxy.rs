@@ -28,7 +28,17 @@ pub async fn start_proxy(config: ProxyConfig) -> Result<watch::Sender<bool>, Str
     let mut listener = None;
     let mut last_err = None;
     for attempt in 1..=10 {
-        match tokio::net::TcpListener::bind(addr).await {
+        let bind_result = async {
+            let socket = if addr.is_ipv4() {
+                tokio::net::TcpSocket::new_v4()?
+            } else {
+                tokio::net::TcpSocket::new_v6()?
+            };
+            let _ = socket.set_reuseaddr(true);
+            socket.bind(addr)?;
+            socket.listen(1024)
+        }.await;
+        match bind_result {
             Ok(l) => {
                 listener = Some(l);
                 break;
@@ -347,6 +357,7 @@ async fn proxy_request(
     // Copy relevant headers (skip host, connection, etc.)
     // We need content-type especially
     outgoing = outgoing.header("Content-Type", "application/json");
+    outgoing = outgoing.header("User-Agent", "Antigravity-Client/1.0");
 
     // Send the request
     let response = match outgoing.body(body_bytes.to_vec()).send().await {
